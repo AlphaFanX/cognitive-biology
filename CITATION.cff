@@ -3,9 +3,14 @@ message: "If you use this software or framework, please cite the paper below."
 title: "Cognitive Biology: From Systems to Somatic Networks, Tissue Cognition, Cognitive Morphogenesis, and Tissue Emotions"
 authors:
   - family-names: Jacobs
-    given-names: Miles
+    given-names: "Miles B."
     affiliation: "genetec.io, Cape Town, South Africa"
     email: extro24@gmail.com
+doi: 10.5281/zenodo.20722139
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.20722139
+    description: "Zenodo archive (concept DOI; resolves to the latest version)"
 abstract: >-
   A computational framework recasting systems biology as Cognitive Biology:
   cells as Cellutrons (hybrid Mealy-Moore automata under transcriptional

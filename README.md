@@ -4,8 +4,11 @@ Code accompanying the paper:
 
 > **Cognitive Biology: From Systems to Somatic Networks, Tissue Cognition,
 > Cognitive Morphogenesis, and Tissue Emotions**
-> Miles Jacobs (genetec.io, Cape Town, South Africa)
-> Preprint: bioRxiv, 2026. Manuscript PDF: [`paper/cognitive_biology_paper_v2.pdf`](paper/cognitive_biology_paper_v2.pdf)
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.20722139](https://doi.org/10.5281/zenodo.20722139)
+> Manuscript PDF: [`paper/cognitive_biology_paper_v2.pdf`](paper/cognitive_biology_paper_v2.pdf)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20722139.svg)](https://doi.org/10.5281/zenodo.20722139)
 
 This repository contains a curated, reproducible subset of the computational
 framework described in the paper. It is **not** the full working tree — only
@@ -76,7 +79,11 @@ but not redistributed here; obtain them from the cited sources.
 
 ## Citing
 
-See [`CITATION.cff`](CITATION.cff). Please cite the bioRxiv preprint.
+See [`CITATION.cff`](CITATION.cff).
+
+> Jacobs, M. B. (2026). *Cognitive Biology: From Systems to Somatic Networks,
+> Tissue Cognition, Cognitive Morphogenesis, and Tissue Emotions.* Zenodo.
+> https://doi.org/10.5281/zenodo.20722139
 
 ## License
 

@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software or framework, please cite the paper below."
+title: "Cognitive Biology: From Systems to Somatic Networks, Tissue Cognition, Cognitive Morphogenesis, and Tissue Emotions"
+authors:
+  - family-names: Jacobs
+    given-names: Miles
+    affiliation: "genetec.io, Cape Town, South Africa"
+    email: extro24@gmail.com
+abstract: >-
+  A computational framework recasting systems biology as Cognitive Biology:
+  cells as Cellutrons (hybrid Mealy-Moore automata under transcriptional
+  attention), somatic networks, and cognitive morphogenesis. Development is
+  initialized by a telomere-gated chromosomal clock reading a stratified,
+  methylation-tagged zygote kernel, and realized as an expanded Neural Cellular
+  Automaton with a language model over transcriptional attention, bioelectric
+  (BETSE) guidance, and low-rank adaptation. A recognizable vertebrate
+  phylotypic body plan computes from the inherited zygote kernel alone.
+keywords:
+  - cognitive biology
+  - morphogenesis
+  - neural cellular automata
+  - bioelectricity
+  - super-enhancers
+  - developmental clock
+  - low-rank adaptation
+license: MIT
+version: "1.0"
+date-released: 2026-06-16

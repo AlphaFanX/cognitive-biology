@@ -1,0 +1,14 @@
+# Core scientific stack (the runnable simulation + figure code)
+numpy>=1.26
+scipy>=1.11
+pandas>=2.0
+matplotlib>=3.7
+
+# Genomic data access (kernel construction from public tracks)
+pybigtools>=0.1
+requests>=2.31
+urllib3>=2.0
+
+# Developmental simulation server (backend/app_developmental.py) — optional
+fastapi>=0.110
+uvicorn>=0.29

@@ -15,6 +15,11 @@ framework described in the paper. It is **not** the full working tree — only
 the modules that implement the mechanisms and generate the results discussed in
 the manuscript, with no API keys, credentials, or large private data.
 
+It also contains the code for the cross-phylum companion paper, *Cognitive
+Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and the
+Substrate-Reader That Sets the Boundary* (see the
+[Cross-phylum validation](#cross-phylum-validation-companion-paper) section).
+
 ## The idea in one paragraph
 
 Living matter is modeled as an ensemble of adaptive automata that compute,
@@ -51,6 +56,25 @@ a low-rank adaptation on top.
 | `medic/genome/abc_client.py`, `ep_interface.py`, `ucsc_client.py` | Activity-by-Contact / enhancer–promoter conditioning interfaces | §3.6 |
 | `backend/app_developmental.py` | Developmental simulation service (FastAPI) | — |
 
+## Cross-phylum validation (companion paper)
+
+These modules implement the cross-phylum companion paper: one Goldman/gap-junction
+operator validated across phyla on distinct morphogenetic readouts, the
+kernel/reader decoupling, and the body-plan generator.
+
+| Module | Role |
+|--------|------|
+| `medic/crossphylum_validation.py` | Combined scorecard runner (one operator, many readouts) |
+| `medic/planaria_bioelectric.py` | Planarian axial polarity (8/8 regeneration outcomes; no genomic kernel) |
+| `medic/zebrafish_vm_validation.py` | Zebrafish fin growth (7/7 Vm-direction) |
+| `medic/xenopus_vm_validation.py` | Xenopus craniofacial "electric face" (bidirectional, ρ=+0.83) |
+| `medic/insect_bioelectric.py` | Holometaboly + the Drosophila wing-disc Vm handle |
+| `medic/genome/kernel_reader.py` | Shared reader interface (methylation and ATAC accessibility) |
+| `medic/body_plan_generator.py` | Body-plan topology from (heads, masks, softmaxes) + Vm axis |
+| `medic/annelid_kernel.py` | Annelid (Capitella) dual-reader concordance across the bilaterian split |
+| `medic/clade_ladder.py` | Clade-ladder breadth program |
+| `medic/nematostella_embryo.py`, `capitella_embryo.py`, `planaria_embryo.py` | Development-from-the-genome montages |
+
 ## Install
 
 ```bash
@@ -65,6 +89,7 @@ The pure-dynamics demonstrations run from public constants in the source:
 python -m medic.zebrafish_somitogenesis      # segmentation clock + somite definition
 python -m medic.silic_validation             # Silic 12-stage validation summary
 python -m medic.embryo_montage               # genome->embryo montage figure
+python -m medic.crossphylum_validation       # cross-phylum operator scorecard (companion paper)
 ```
 
 Genome-conditioned modules (kernel construction, SE/ABC attention) additionally

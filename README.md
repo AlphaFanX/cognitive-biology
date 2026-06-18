@@ -58,9 +58,17 @@ a low-rank adaptation on top.
 
 ## Cross-phylum validation (companion paper)
 
-These modules implement the cross-phylum companion paper: one Goldman/gap-junction
-operator validated across phyla on distinct morphogenetic readouts, the
-kernel/reader decoupling, and the body-plan generator.
+These modules implement the cross-phylum companion paper:
+
+> **Cognitive Biology Across Phyla: One Bioelectric Operator, Many Body Plans,
+> and the Substrate-Reader That Sets the Boundary**
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.20746637](https://doi.org/10.5281/zenodo.20746637)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20746637.svg)](https://doi.org/10.5281/zenodo.20746637)
+
+One Goldman/gap-junction operator validated across phyla on distinct
+morphogenetic readouts, the kernel/reader decoupling, and the body-plan generator.
 
 | Module | Role |
 |--------|------|
@@ -109,6 +117,10 @@ See [`CITATION.cff`](CITATION.cff).
 > Jacobs, M. B. (2026). *Cognitive Biology: From Systems to Somatic Networks,
 > Tissue Cognition, Cognitive Morphogenesis, and Tissue Emotions.* Zenodo.
 > https://doi.org/10.5281/zenodo.20722139
+
+> Jacobs, M. B. (2026). *Cognitive Biology Across Phyla: One Bioelectric Operator,
+> Many Body Plans, and the Substrate-Reader That Sets the Boundary.* Zenodo.
+> https://doi.org/10.5281/zenodo.20746637
 
 ## License
 

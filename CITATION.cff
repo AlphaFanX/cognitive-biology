@@ -29,5 +29,15 @@ keywords:
   - developmental clock
   - low-rank adaptation
 license: MIT
-version: "1.0"
-date-released: 2026-06-16
+version: "1.1"
+date-released: 2026-06-18
+references:
+  - type: article
+    title: "Cognitive Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and the Substrate-Reader That Sets the Boundary"
+    authors:
+      - family-names: Jacobs
+        given-names: "Miles B."
+        affiliation: "genetec.io, Cape Town, South Africa"
+    doi: 10.5281/zenodo.20746637
+    year: 2026
+    notes: "Cross-phylum companion paper; its code is included in this repository."

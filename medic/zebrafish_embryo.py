@@ -35,13 +35,77 @@ try:
     from .zebrafish_somitogenesis import SegmentationClock, Her1Oscillator
     from . import zebrafish_movie as zm
     from . import silic_validation as sv
+    from .bioelectric_development import (
+        ORGAN_CONDUCTANCE_PROFILES, E_NA, E_K, E_CA, E_CL,
+    )
 except ImportError:  # pragma: no cover
     from medic.zebrafish_bioelectric import TISSUE_VMEM_ESTIMATES
     from medic.zebrafish_somitogenesis import SegmentationClock, Her1Oscillator
     from medic import zebrafish_movie as zm
     from medic import silic_validation as sv
+    from medic.bioelectric_development import (
+        ORGAN_CONDUCTANCE_PROFILES, E_NA, E_K, E_CA, E_CL,
+    )
 
 V = TISSUE_VMEM_ESTIMATES
+
+# =============================================================================
+# Anchor the movie's organs to the FITTED 11-organ model
+# =============================================================================
+# The 11-organ resting-voltage map is computed by the genome->Goldman pipeline,
+# with g_K fitted per organ to the Levin target (medic/bioelectric_development.py:
+# _compute_organ_conductances). The movie previously coloured organs from the
+# generic literature table (TISSUE_VMEM_ESTIMATES); here we instead colour each
+# organ by the voltage the FITTED MODEL DERIVES, so the movie faithfully renders
+# the model's output. (The fit is intentional -- the claim is that the genome->
+# phenome loop can be CLOSED at all; an un-anchored forward prediction is future
+# work. See memory: cognimed-paper-claim-audit.)
+
+def _goldman_rest(profile):
+    """Achieved resting Vmem (mV) for a fitted organ conductance profile.
+
+    Mirrors the resting-potential formula in bioelectric_development.py
+    (10% of g_Ca open at rest)."""
+    g_Na, g_K, g_Ca, g_Cl, _g_gj = profile
+    g_Ca_rest = 0.1 * g_Ca
+    g_tot = g_Na + g_K + g_Ca_rest + g_Cl + 1e-10
+    return (g_Na * E_NA + g_K * E_K + g_Ca_rest * E_CA + g_Cl * E_CL) / g_tot
+
+
+def _model_organ_voltage(organ):
+    """Fitted-model voltage for a model organ name.
+
+    Paired organs (kidney/lung) carry their target-corrected profile in the
+    *_left/_right entries (-35/-25 mV); the unpaired base entry is the
+    uncorrected -50 mV default, so prefer the paired profile when it exists."""
+    for paired in (organ + "_left", organ + "_right"):
+        if paired in ORGAN_CONDUCTANCE_PROFILES:
+            return _goldman_rest(ORGAN_CONDUCTANCE_PROFILES[paired])
+    if organ in ORGAN_CONDUCTANCE_PROFILES:
+        return _goldman_rest(ORGAN_CONDUCTANCE_PROFILES[organ])
+    return None
+
+
+# movie organ V-key -> fitted-model organ. Documented anchoring; where the movie
+# shows a structure the 11-organ model does not enumerate, map to the nearest
+# same-germ-layer model organ (the tweak is explicit, not hidden):
+MOVIE_VKEY_TO_MODEL = {
+    "brain_neuron":     "brain",     # ectoderm / neural
+    "retinal_ganglion": "brain",     # eye = neural ectoderm -> nearest model organ
+    "heart_primordium": "heart",     # mesoderm
+    "pronephros":       "kidney",    # embryonic kidney -> kidney (paired, -35 mV)
+    "liver":            "liver",     # endoderm
+    "pancreas":         "pancreas",  # endoderm
+    "gut_endoderm":     "gut",       # endoderm
+    "fin_mesenchyme":   "muscle",    # fin mesenchyme = mesoderm -> nearest model organ
+}
+
+# resolve to numeric fitted-model voltages once (falls through to V if absent)
+MODEL_ORGAN_VMEM = {}
+for _vkey, _morgan in MOVIE_VKEY_TO_MODEL.items():
+    _v = _model_organ_voltage(_morgan)
+    if _v is not None:
+        MODEL_ORGAN_VMEM[_vkey] = _v
 N_RENDER = 12000                         # cells actually DRAWN (a subsample)
 MAX_SOMITES = zm.MAX_SOMITES
 YCX, YCY, YR = 0.26, 0.50, 0.205         # yolk circle (lateral)
@@ -221,10 +285,12 @@ class CellField:
         rgba[self.role == NEURAL] = zm.vmem_color(V["spinal_cord_neuron"])
         # notochord (rod) -- distinct brown
         rgba[self.role == NOTOCHORD] = (0.69, 0.47, 0.18, 1.0)
-        # organs by genome Vmem
+        # organs by the FITTED 11-organ model Vmem (anchored to model output;
+        # falls back to the literature table only if an organ has no model match)
         for oi, org in enumerate(zm.ORGANS):
             m = (self.role == ORGAN) & (self.organ_id == oi)
-            rgba[m] = zm.vmem_color(V.get(org.vkey, -40.0))
+            vm = MODEL_ORGAN_VMEM.get(org.vkey, V.get(org.vkey, -40.0))
+            rgba[m] = zm.vmem_color(vm)
         # yolk
         rgba[self.role == YOLK] = (0.92, 0.80, 0.45, 0.9)
         return rgba

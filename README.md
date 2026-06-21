@@ -82,6 +82,7 @@ morphogenetic readouts, the kernel/reader decoupling, and the body-plan generato
 | `medic/annelid_kernel.py` | Annelid (Capitella) dual-reader concordance across the bilaterian split |
 | `medic/clade_ladder.py` | Clade-ladder breadth program |
 | `medic/nematostella_embryo.py`, `capitella_embryo.py`, `planaria_embryo.py` | Development-from-the-genome montages |
+| `medic/nematostella_se_heads.py`, `annelid_se_heads.py` | Genome-derived head repertoires via super-enhancer calling on real ATAC (N_SE = 643 / 949) |
 
 ## Install
 

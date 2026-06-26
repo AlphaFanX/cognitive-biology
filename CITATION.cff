@@ -29,8 +29,8 @@ keywords:
   - developmental clock
   - low-rank adaptation
 license: MIT
-version: "1.1"
-date-released: 2026-06-18
+version: "1.2"
+date-released: 2026-06-27
 references:
   - type: article
     title: "Cognitive Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and the Substrate-Reader That Sets the Boundary"
@@ -41,3 +41,12 @@ references:
     doi: 10.5281/zenodo.20746637
     year: 2026
     notes: "Cross-phylum companion paper; its code is included in this repository."
+  - type: article
+    title: "Cognitive Biology and Organ Formation: Organs as Master-Transcription-Factor Heads Read From an Accessibility Code"
+    authors:
+      - family-names: Jacobs
+        given-names: "Miles B."
+        affiliation: "genetec.io, Cape Town, South Africa"
+    doi: 10.5281/zenodo.20925727
+    year: 2026
+    notes: "Organ-formation companion paper (Paper #4); its code is included in this repository."

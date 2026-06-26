@@ -15,10 +15,13 @@ framework described in the paper. It is **not** the full working tree — only
 the modules that implement the mechanisms and generate the results discussed in
 the manuscript, with no API keys, credentials, or large private data.
 
-It also contains the code for the cross-phylum companion paper, *Cognitive
-Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and the
-Substrate-Reader That Sets the Boundary* (see the
-[Cross-phylum validation](#cross-phylum-validation-companion-paper) section).
+It also contains the code for two companion papers: the cross-phylum paper,
+*Cognitive Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and
+the Substrate-Reader That Sets the Boundary* (see
+[Cross-phylum validation](#cross-phylum-validation-companion-paper)), and the
+organ-formation paper, *Cognitive Biology and Organ Formation: Organs as
+Master-Transcription-Factor Heads Read From an Accessibility Code* (see
+[Organ formation](#organ-formation-companion-paper)).
 
 ## The idea in one paragraph
 
@@ -84,6 +87,38 @@ morphogenetic readouts, the kernel/reader decoupling, and the body-plan generato
 | `medic/nematostella_embryo.py`, `capitella_embryo.py`, `planaria_embryo.py` | Development-from-the-genome montages |
 | `medic/nematostella_se_heads.py`, `annelid_se_heads.py` | Genome-derived head repertoires via super-enhancer calling on real ATAC (N_SE = 643 / 949) |
 
+## Organ formation (companion paper)
+
+These modules implement the organ-formation companion paper:
+
+> **Cognitive Biology and Organ Formation: Organs as Master-Transcription-Factor
+> Heads Read From an Accessibility Code**
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.20925727](https://doi.org/10.5281/zenodo.20925727)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20925727.svg)](https://doi.org/10.5281/zenodo.20925727)
+
+Organs as separable, conserved master-transcription-factor **heads** read from
+the super-enhancer/accessibility landscape (not from enhancer sequence), and the
+bioelectric substrate's **field–form correspondence** (the gap-junction
+operator's cymatic modes coincide with facial, cardiac and gut geometry).
+
+| Module | Role |
+|--------|------|
+| `medic/organ_cascade.py` | **Stage 1:** organ Fate heads — ABC super-enhancers recover each organ's master-TF kernel (recall@25 23.9% vs 4.3% null, *p* = 0.0005) |
+| `medic/organ_cascade_wiring.py`, `_v2.py`, `_v3.py` | **Stage 2:** TF→super-enhancer motif wiring (presence / enrichment / cluster-density) — the negative: organ identity is not in enhancer sequence |
+| `medic/organ_cascade_combinatorial.py` | "TF words" bag-of-motifs organ classifier (≈ chance) |
+| `medic/organ_cascade_kmer.py` | 6-mer sequence-grammar classifier (faint, borderline) |
+| `medic/organ_cascade_process_heads.py` | Migration + Division heads by cell-state contrast (SNAI2 first, *p* = 0.0007; Division MYC-only) |
+| `medic/kernel_nca_stress.py` | Bioelectric substrate: settling wave, ablation recovery, screening length, cymatic eigenmodes, stability bound |
+| `medic/nca_abc_modes.py` | NCA cymatic modes from the ABC gap-junction operator; low-rank target; NCA↔FaceBase mode match |
+| `medic/organ_modes.py` | Field–form correspondence for heart (LV) and gut (tube) electrical syncytia |
+| `medic/bolster_electric_tests.py` | Tests 1–3: forward un-anchored Vm, shuffle null, channel-class ablation |
+| `medic/craniofacial_stability.py` | Test 4: CS13–CS17 craniofacial enhancer stability across morphogenesis |
+| `face_demo/face_eigenmodes.py` | FaceBase mesh cleaning + cotangent Laplace–Beltrami geometry modes |
+| `face_demo/electric_face_correspondence.py` | Gap-junction field vs facial-geometry shared eigenbasis (ρ = 1.00) |
+| `face_demo/mesh_morph.py` | FaceBase mean-mesh loader (genome→face morph helper) |
+
 ## Install
 
 ```bash
@@ -122,6 +157,10 @@ See [`CITATION.cff`](CITATION.cff).
 > Jacobs, M. B. (2026). *Cognitive Biology Across Phyla: One Bioelectric Operator,
 > Many Body Plans, and the Substrate-Reader That Sets the Boundary.* Zenodo.
 > https://doi.org/10.5281/zenodo.20746637
+
+> Jacobs, M. B. (2026). *Cognitive Biology and Organ Formation: Organs as
+> Master-Transcription-Factor Heads Read From an Accessibility Code.* Zenodo.
+> https://doi.org/10.5281/zenodo.20925727
 
 ## License
 

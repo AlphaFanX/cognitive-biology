@@ -11,7 +11,12 @@ these datasets; only the genome-conditioned modules require them.
 |---------|---------|--------|
 | **Jadhav developmental-enhancer methylation** (WGBS E12.5/E16.5/Adult + H3K4me1/H3K27ac) | `medic/genome/zygote_kernel.py`, `medic/genome/real_kernel.py`, `medic/genome/embryonic_methylation.py` | GEO **GSE111024** → `data/jadhav_mouse/` |
 | **Super-enhancer atlas** (`SE.sqlite`) | `medic/se_guided_differentiation.py`, `medic/genomic_attention.py` | SEdb / dbSUPER (build SQLite from the published SE.bed) |
-| **Activity-by-Contact enhancer–promoter predictions** (`AllPredictions.ABC.txt.gz`) | `medic/genome/abc_client.py`, `medic/genome/ep_interface.py` | ABC model predictions (Nasser et al. 2021) → `data/enhancer_promoter/` |
+| **Activity-by-Contact enhancer–promoter predictions** (`AllPredictions.ABC.txt.gz`) | `medic/genome/abc_client.py`, `medic/genome/ep_interface.py`, `medic/organ_cascade.py` | ABC model predictions (Nasser et al. 2021) → `data/enhancer_promoter/` |
+| **Human transcription-factor list** (`human_tfs_lambert2018.txt`) | `medic/organ_cascade*.py` | Lambert et al. 2018 → `data/` |
+| **JASPAR 2024 CORE vertebrate PFMs** | `medic/organ_cascade_wiring*.py` | JASPAR 2024 → `data/JASPAR2024_CORE_vertebrates_nr_pfms.txt` |
+| **Super-enhancer sequences** (`se_sequences.json`) | `medic/organ_cascade_wiring*.py`, `medic/organ_cascade_{combinatorial,kmer}.py` | Ensembl REST region endpoint (GRCh38), cached → `data/se_sequences.json` |
+| **Human embryonic craniofacial H3K27ac** (Carnegie stages CS13–CS17) | `medic/craniofacial_stability.py` | Wilderman et al. 2018 (Cell Reports), human craniofacial epigenome (GEO) |
+| **FaceBase mean-face mesh** (`meanface.npz`: 43,071-vertex surface + landmarks) | `face_demo/*.py`, `medic/nca_abc_modes.py`, `medic/organ_modes.py` | FaceBase (`Meanshape.mat`) → `face_demo/data/meanface.npz` (override path with `$FACEBASE_MEANFACE`) |
 | **Additional GEO tracks** | kernel construction | GEO **GSE115541** |
 
 Notes:

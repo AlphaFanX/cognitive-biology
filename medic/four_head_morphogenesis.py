@@ -491,6 +491,71 @@ class MorphogenHead:
         return name, conc[name]
 
 
+class VmSourcedMorphogenHead(MorphogenHead):
+    """Morphogen head whose SOURCE POSITIONS emerge from the bioelectric field.
+
+    Thesis (Levin; this work): the electric field is instructive for anatomy;
+    morphogens are the essential effectors that execute it. The hardcoded
+    ``MorphogenHead`` treats each morphogen source as an independent spatial
+    coordinate. Here every source COORDINATE is removed and re-derived from
+    the Vm field: each morphogen is produced by an organizer tissue with a
+    characteristic bioelectric signature -- a target voltage V* (a biological
+    constant, NOT a position) -- and its source is placed at the domain
+    location whose Vm best matches V*.
+
+    Only a voltage is supplied per morphogen. If the emergent gradients
+    reproduce the canonical (hardcoded) ones, the Vm field carries the
+    positional information; where they do not, that axis is not in Vm.
+    """
+
+    # Organizer bioelectric signatures (mV). Biological, NOT positional.
+    # Dorsal organizer + notochord/floor-plate = hyperpolarized;
+    # ventral + posterior = depolarized (Levin lab Xenopus polarity).
+    ORGANIZER_VM = {
+        'NODAL': -65.0,  # Spemann organizer / dorsal midline (hyperpolarized)
+        'SHH':   -60.0,  # notochord / floor plate (hyperpolarized)
+        'BMP':   -20.0,  # ventral epidermis/blood (depolarized)
+        'WNT':   -25.0,  # posterior / tail (depolarized)
+        'FGF':   -35.0,  # posterior PSM / isthmus (mesoderm)
+        'RA':    -35.0,  # trunk somites (mesoderm)
+    }
+
+    def __init__(self, vm_field, domain_samples: np.ndarray,
+                 gradients: Optional[List[MorphogenSpec]] = None):
+        """
+        Args:
+            vm_field: callable position(3,) -> voltage_mv (the bioelectric field).
+            domain_samples: (N, 3) candidate source positions to search over.
+            gradients: morphogen specs (decay lengths reused; sources ignored).
+        """
+        super().__init__(gradients)
+        self.vm_field = vm_field
+        self.domain = np.asarray(domain_samples, dtype=float)
+        self._domain_vm = np.array([float(vm_field(p)) for p in self.domain])
+        self.derived_sources = self._derive_sources()
+
+    def _derive_sources(self) -> Dict[str, np.ndarray]:
+        """Place each morphogen source at the Vm best matching its organizer V*."""
+        sources = {}
+        for g in self.gradients:
+            vstar = self.ORGANIZER_VM[g.name]
+            idx = int(np.argmin(np.abs(self._domain_vm - vstar)))
+            sources[g.name] = self.domain[idx].copy()
+        return sources
+
+    def forward_vector(self, position: np.ndarray) -> np.ndarray:
+        vec = np.zeros(self.n_morphogens)
+        for i, g in enumerate(self.gradients):
+            src = self.derived_sources[g.name]
+            dist = np.linalg.norm(np.asarray(position, float) - src)
+            vec[i] = np.exp(-dist / g.decay_length)
+        return vec
+
+    def forward(self, position: np.ndarray) -> Dict[str, float]:
+        vec = self.forward_vector(position)
+        return {g.name: float(vec[i]) for i, g in enumerate(self.gradients)}
+
+
 # =============================================================================
 # HEAD 5: Connexin Attention (gap junction coupling profiles)
 # =============================================================================

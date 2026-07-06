@@ -127,8 +127,16 @@ PHASE_2_END = 128   # Signals accumulate (gastrulation -> neurulation)
 # =============================================================================
 #
 # Queried AllPredictions.ABC.txt.gz for 45 ion channel genes across 131 cell
-# types matched to our 11 organs. Total activity_base scores per channel type
+# types matched to our organs. Total activity_base scores per channel type
 # normalized to conductance ratios.
+#
+# PROVENANCE NOTE (2026-06-28): the Nasser 2021 ABC atlas contains NO kidney
+# biosample (verified: 131 biosamples, none renal). The "kidney" row below is
+# therefore IMPUTED, not queried from ABC, and is excluded from the forward
+# voltage validation in Paper #1 (potassium-anchor table) and Paper #4. Treat
+# it as a placeholder pending a real kidney expression source (e.g. GTEx
+# Kidney_Cortex). "ABC" here = this curated per-organ channel-activity table,
+# which is distinct from the genome-wide Nasser enhancer-gene biosample atlas.
 #
 # These replace the simple linear A-P gradient with organ-specific voltage
 # territories. The conductance profile IS the cymatic generator -- the SE
@@ -146,7 +154,7 @@ _ABC_ION_CHANNEL_ACTIVITY = {
     "brain":      (207.27,    470.72,    305.45,    111.69,    75.26),
     "heart":      (125.64,    521.73,    154.02,    144.09,    123.83),
     "liver":      (116.54,    458.29,    180.40,    154.09,    110.45),
-    "kidney":     (133.95,    305.77,     76.75,    101.89,     59.43),
+    "kidney":     (133.95,    305.77,     76.75,    101.89,     59.43),  # IMPUTED - no kidney biosample in ABC (see provenance note above)
     "pancreas":   (297.90,    556.86,     86.37,    167.81,     36.34),
     "lung":       ( 51.43,    134.77,     53.95,     37.54,     35.69),
     "muscle":     (359.06,    745.18,    180.72,    233.97,    145.81),

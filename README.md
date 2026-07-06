@@ -15,13 +15,15 @@ framework described in the paper. It is **not** the full working tree — only
 the modules that implement the mechanisms and generate the results discussed in
 the manuscript, with no API keys, credentials, or large private data.
 
-It also contains the code for two companion papers: the cross-phylum paper,
+It also contains the code for three companion papers: the cross-phylum paper,
 *Cognitive Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and
 the Substrate-Reader That Sets the Boundary* (see
-[Cross-phylum validation](#cross-phylum-validation-companion-paper)), and the
+[Cross-phylum validation](#cross-phylum-validation-companion-paper)); the
 organ-formation paper, *Cognitive Biology and Organ Formation: Organs as
 Master-Transcription-Factor Heads Read From an Accessibility Code* (see
-[Organ formation](#organ-formation-companion-paper)).
+[Organ formation](#organ-formation-companion-paper)); and the embryo-computation
+paper, *Cognitive Biology: Computing the Embryo* (see
+[Computing the embryo](#computing-the-embryo-companion-paper)).
 
 ## The idea in one paragraph
 
@@ -119,6 +121,39 @@ operator's cymatic modes coincide with facial, cardiac and gut geometry).
 | `face_demo/electric_face_correspondence.py` | Gap-junction field vs facial-geometry shared eigenbasis (ρ = 1.00) |
 | `face_demo/mesh_morph.py` | FaceBase mean-mesh loader (genome→face morph helper) |
 
+## Computing the embryo (companion paper)
+
+These modules implement the embryo-computation companion paper:
+
+> **Cognitive Biology: Computing the Embryo**
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.21221930](https://doi.org/10.5281/zenodo.21221930)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21221930.svg)](https://doi.org/10.5281/zenodo.21221930)
+
+The four morphogenetic heads (differentiation, division, migration, shape)
+learned on real spatiotemporal atlases and driven forward as a single
+grow-from-one-cell embryo, plus the "electric body" positional frame and the
+lateral-inhibition mechanism behind the symmetric eye pair and cyclopia.
+
+| Module | Role |
+|--------|------|
+| `medic/silic_train.py`, `zesta_train.py` | Spatial-NCA training on the Silic and ZESTA (Stereo-seq) atlases |
+| `medic/zesta_temporal_4d.py` | Temporal 4-D fit: the field condenses out of the blastula (Moran 0→0.94) |
+| `medic/gj_operator_train.py` | Genome-derived gap-junction operator (the connexin-domain null) |
+| `medic/shareseq_diff_head.py`, `shareseq_div_head.py`, `shareseq_mig_head.py`, `shareseq_shape_head.py` | The four heads fit as hypernetwork weights on SHARE-seq skin |
+| `medic/differentiation_clock.py` | Telomere→PRC2-withdrawal + Hox clock: WHEN each fate unlocks (ρ = 0.95) |
+| `medic/division_head.py` | Proliferation program → division→telomere→PRC2 clock (ρ = 0.94) |
+| `medic/migration_head.py` | Motility program + convergent extension computed forward in 3-D (×3.2 elongation) |
+| `medic/shape_head.py` | Constriction/adhesion program → neural-tube closure and lip fusion; knockdown → NTD/harelip |
+| `medic/mechanical_fusion.py` | Folding as a buckling eigenmode; cleft ⟺ Fiedler λ₂ = 0 |
+| `medic/growing_domain.py` | Grow-from-one-cell domain substrate |
+| `medic/unified_embryo.py`, `unified_embryo_figure.py` | All four heads intercalated per timestep in one forward pass |
+| `medic/symmetric_embryo_figure.py` | Bilaterally symmetric embryo hero figure |
+| `medic/electric_body_frame.py` | Low gap-junction eigenmodes ARE the body axes (AP 0.96 / DV 0.77 / LR = midline) |
+| `medic/electric_face_feedback.py`, `field_driven_eye.py` | Frame + lateral inhibition → symmetric eye pair; weak frame → cyclopia |
+| `medic/morphogenesis_failures.py`, `gill_covering.py` | Failure-mode and covering demonstrations |
+
 ## Install
 
 ```bash
@@ -161,6 +196,9 @@ See [`CITATION.cff`](CITATION.cff).
 > Jacobs, M. B. (2026). *Cognitive Biology and Organ Formation: Organs as
 > Master-Transcription-Factor Heads Read From an Accessibility Code.* Zenodo.
 > https://doi.org/10.5281/zenodo.20925727
+
+> Jacobs, M. B. (2026). *Cognitive Biology: Computing the Embryo.* Zenodo.
+> https://doi.org/10.5281/zenodo.21221930
 
 ## License
 

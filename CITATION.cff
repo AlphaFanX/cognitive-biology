@@ -29,8 +29,8 @@ keywords:
   - developmental clock
   - low-rank adaptation
 license: MIT
-version: "1.2"
-date-released: 2026-06-27
+version: "1.3"
+date-released: 2026-07-06
 references:
   - type: article
     title: "Cognitive Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and the Substrate-Reader That Sets the Boundary"
@@ -50,3 +50,12 @@ references:
     doi: 10.5281/zenodo.20925727
     year: 2026
     notes: "Organ-formation companion paper (Paper #4); its code is included in this repository."
+  - type: article
+    title: "Cognitive Biology: Computing the Embryo"
+    authors:
+      - family-names: Jacobs
+        given-names: "Miles B."
+        affiliation: "genetec.io, Cape Town, South Africa"
+    doi: 10.5281/zenodo.21221930
+    year: 2026
+    notes: "Embryo-computation companion paper (Paper #6); its code is included in this repository."

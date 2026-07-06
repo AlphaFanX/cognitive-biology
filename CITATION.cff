@@ -29,9 +29,18 @@ keywords:
   - developmental clock
   - low-rank adaptation
 license: MIT
-version: "1.3"
+version: "1.4"
 date-released: 2026-07-06
 references:
+  - type: article
+    title: "Cognitive Biology: Perceptrons and Morphogen Primordia"
+    authors:
+      - family-names: Jacobs
+        given-names: "Miles B."
+        affiliation: "genetec.io, Cape Town, South Africa"
+    doi: 10.5281/zenodo.21143761
+    year: 2026
+    notes: "Design companion paper (Paper #2); its code is included in this repository."
   - type: article
     title: "Cognitive Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and the Substrate-Reader That Sets the Boundary"
     authors:
@@ -50,6 +59,15 @@ references:
     doi: 10.5281/zenodo.20925727
     year: 2026
     notes: "Organ-formation companion paper (Paper #4); its code is included in this repository."
+  - type: article
+    title: "Cognitive Biology: The Inner Perceptron versus the Outer Perceptron"
+    authors:
+      - family-names: Jacobs
+        given-names: "Miles B."
+        affiliation: "genetec.io, Cape Town, South Africa"
+    doi: 10.5281/zenodo.21143016
+    year: 2026
+    notes: "Two-perceptron companion paper (Paper #5); its code is included in this repository."
   - type: article
     title: "Cognitive Biology: Computing the Embryo"
     authors:

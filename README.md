@@ -15,14 +15,18 @@ framework described in the paper. It is **not** the full working tree — only
 the modules that implement the mechanisms and generate the results discussed in
 the manuscript, with no API keys, credentials, or large private data.
 
-It also contains the code for three companion papers: the cross-phylum paper,
-*Cognitive Biology Across Phyla: One Bioelectric Operator, Many Body Plans, and
-the Substrate-Reader That Sets the Boundary* (see
+It also contains the code for five companion papers: the design paper,
+*Cognitive Biology: Perceptrons and Morphogen Primordia* (see
+[Perceptrons and morphogen primordia](#perceptrons-and-morphogen-primordia-companion-paper));
+the cross-phylum paper, *Cognitive Biology Across Phyla: One Bioelectric
+Operator, Many Body Plans, and the Substrate-Reader That Sets the Boundary* (see
 [Cross-phylum validation](#cross-phylum-validation-companion-paper)); the
 organ-formation paper, *Cognitive Biology and Organ Formation: Organs as
 Master-Transcription-Factor Heads Read From an Accessibility Code* (see
-[Organ formation](#organ-formation-companion-paper)); and the embryo-computation
-paper, *Cognitive Biology: Computing the Embryo* (see
+[Organ formation](#organ-formation-companion-paper)); the two-perceptron paper,
+*Cognitive Biology: The Inner Perceptron versus the Outer Perceptron* (see
+[Inner and outer perceptron](#the-inner-and-outer-perceptron-companion-paper));
+and the embryo-computation paper, *Cognitive Biology: Computing the Embryo* (see
 [Computing the embryo](#computing-the-embryo-companion-paper)).
 
 ## The idea in one paragraph
@@ -60,6 +64,32 @@ a low-rank adaptation on top.
 | `medic/zebrafish_bioelectric.py`, `xenopus_bioelectric.py` | Developmental voltage atlases (Levin-style Vmem maps) | §2.3 |
 | `medic/genome/abc_client.py`, `ep_interface.py`, `ucsc_client.py` | Activity-by-Contact / enhancer–promoter conditioning interfaces | §3.6 |
 | `backend/app_developmental.py` | Developmental simulation service (FastAPI) | — |
+
+## Perceptrons and morphogen primordia (companion paper)
+
+These modules implement the design companion paper:
+
+> **Cognitive Biology: Perceptrons and Morphogen Primordia**
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.21143761](https://doi.org/10.5281/zenodo.21143761)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21143761.svg)](https://doi.org/10.5281/zenodo.21143761)
+
+The layer-resolved "glass-box" kernel, the GWAS magnitude (cis-LoRA) layer, and
+morphogen **primordia** placed as operators on the bioelectric field — the
+electric face and trunk from a symmetric positional frame.
+
+| Module | Role |
+|--------|------|
+| `medic/glass_box_kernel.py`, `glass_box_kernel_3d.py` | Layer-resolved glass-box kernel (every layer has an assay) |
+| `medic/magnitude_layer.py`, `magnitude_layer_singlecell.py` | GWAS magnitude / cis-LoRA adapter layer |
+| `medic/primordium_operator.py` | Morphogen-primordium operator on the gap-junction field |
+| `medic/trained_kernel_head.py` | Trained kernel head |
+| `medic/heart_primordium_3d.py`, `gut_primordium_3d.py` | 3-D organ primordia |
+| `medic/alphagenome_morphogen_embryonic.py`, `alphagenome_morphogen_rd.py` | AlphaGenome-conditioned morphogen fronts |
+| `medic/conductance_gwas_test.py`, `gtex_forward_test.py` | GWAS conductance test; GTEx forward validation |
+| `face_demo/face_morphogenesis.py`, `face_nca_growth.py` | Electric-face morphogenesis and NCA growth |
+| `face_demo/morphogen_orientation.py`, `primordium_placement.py`, `trunk_placement.py` | Symmetric morphogen orientation and primordium/trunk placement |
 
 ## Cross-phylum validation (companion paper)
 
@@ -120,6 +150,32 @@ operator's cymatic modes coincide with facial, cardiac and gut geometry).
 | `face_demo/face_eigenmodes.py` | FaceBase mesh cleaning + cotangent Laplace–Beltrami geometry modes |
 | `face_demo/electric_face_correspondence.py` | Gap-junction field vs facial-geometry shared eigenbasis (ρ = 1.00) |
 | `face_demo/mesh_morph.py` | FaceBase mean-mesh loader (genome→face morph helper) |
+
+## The inner and outer perceptron (companion paper)
+
+These modules implement the two-perceptron companion paper:
+
+> **Cognitive Biology: The Inner Perceptron versus the Outer Perceptron**
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.21143016](https://doi.org/10.5281/zenodo.21143016)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21143016.svg)](https://doi.org/10.5281/zenodo.21143016)
+
+The inner (NCA) versus outer (Large Genomic Model) perceptron split, with every
+coefficient traced to a genome × literature equation, plus surgery-free
+bioelectric interventions.
+
+| Module | Role |
+|--------|------|
+| `medic/perceptron_trace.py` | Two-perceptron (inner NCA / outer LGM) traceability + the three tables |
+| `medic/ectopic_eye.py` | Bioelectric ectopic-eye demonstration (Pai/Levin 2012) |
+| `medic/two_headed_planaria.py` | Two-headed planarian from a gap-junction perturbation |
+| `medic/limb_inverse_design.py` | Limb inverse-design demonstration |
+| `medic/morphogen_rd.py` | Morphogen reaction–diffusion organs |
+| `medic/nca_vertebrate_3d.py` | Forward Bauplan + 3-D ectopic body (`--ectopic`) |
+| `medic/motility_clock.py` | FGF/ERK motility clock |
+| `medic/zebrafish_somitogenesis.py` | Segmentation clock (shared with the foundational paper) |
+| `medic/bioelectric_development.py` | Goldman/conductance read (shared) |
 
 ## Computing the embryo (companion paper)
 
@@ -189,6 +245,9 @@ See [`CITATION.cff`](CITATION.cff).
 > Tissue Cognition, Cognitive Morphogenesis, and Tissue Emotions.* Zenodo.
 > https://doi.org/10.5281/zenodo.20722139
 
+> Jacobs, M. B. (2026). *Cognitive Biology: Perceptrons and Morphogen Primordia.*
+> Zenodo. https://doi.org/10.5281/zenodo.21143761
+
 > Jacobs, M. B. (2026). *Cognitive Biology Across Phyla: One Bioelectric Operator,
 > Many Body Plans, and the Substrate-Reader That Sets the Boundary.* Zenodo.
 > https://doi.org/10.5281/zenodo.20746637
@@ -196,6 +255,9 @@ See [`CITATION.cff`](CITATION.cff).
 > Jacobs, M. B. (2026). *Cognitive Biology and Organ Formation: Organs as
 > Master-Transcription-Factor Heads Read From an Accessibility Code.* Zenodo.
 > https://doi.org/10.5281/zenodo.20925727
+
+> Jacobs, M. B. (2026). *Cognitive Biology: The Inner Perceptron versus the
+> Outer Perceptron.* Zenodo. https://doi.org/10.5281/zenodo.21143016
 
 > Jacobs, M. B. (2026). *Cognitive Biology: Computing the Embryo.* Zenodo.
 > https://doi.org/10.5281/zenodo.21221930

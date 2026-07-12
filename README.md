@@ -15,7 +15,7 @@ framework described in the paper. It is **not** the full working tree — only
 the modules that implement the mechanisms and generate the results discussed in
 the manuscript, with no API keys, credentials, or large private data.
 
-It also contains the code for five companion papers: the design paper,
+It also contains the code for six companion papers: the design paper,
 *Cognitive Biology: Perceptrons and Morphogen Primordia* (see
 [Perceptrons and morphogen primordia](#perceptrons-and-morphogen-primordia-companion-paper));
 the cross-phylum paper, *Cognitive Biology Across Phyla: One Bioelectric
@@ -26,8 +26,11 @@ Master-Transcription-Factor Heads Read From an Accessibility Code* (see
 [Organ formation](#organ-formation-companion-paper)); the two-perceptron paper,
 *Cognitive Biology: The Inner Perceptron versus the Outer Perceptron* (see
 [Inner and outer perceptron](#the-inner-and-outer-perceptron-companion-paper));
-and the embryo-computation paper, *Cognitive Biology: Computing the Embryo* (see
-[Computing the embryo](#computing-the-embryo-companion-paper)).
+the embryo-computation paper, *Cognitive Biology: Computing the Embryo* (see
+[Computing the embryo](#computing-the-embryo-companion-paper)); and the
+differentiation-clock paper, *Cognitive Biology: Differentiation Clocks, Organ
+Formation and the MLP* (see
+[Differentiation clocks, organ formation and the MLP](#differentiation-clocks-organ-formation-and-the-mlp-companion-paper)).
 
 ## The idea in one paragraph
 
@@ -210,6 +213,34 @@ lateral-inhibition mechanism behind the symmetric eye pair and cyclopia.
 | `medic/electric_face_feedback.py`, `field_driven_eye.py` | Frame + lateral inhibition → symmetric eye pair; weak frame → cyclopia |
 | `medic/morphogenesis_failures.py`, `gill_covering.py` | Failure-mode and covering demonstrations |
 
+## Differentiation clocks, organ formation and the MLP (companion paper)
+
+These modules implement the differentiation-clock companion paper:
+
+> **Cognitive Biology: Differentiation Clocks, Organ Formation and the MLP**
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.21322049](https://doi.org/10.5281/zenodo.21322049)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21322049.svg)](https://doi.org/10.5281/zenodo.21322049)
+
+Identity (what a cell becomes) separated from timing (when) and coupled by one
+clock shared by two MLP heads: the division head drives it (division→telomere→
+PRC2 withdrawal) and the differentiation head reads it. A mechanism clock and a
+measured clock (ENCODE mouse fetal atlas) time cell types across organs, and the
+organ head's four effectors (connexin frame, morphogen reaction-diffusion,
+Delta–Notch lateral inhibition, cadherin cohesion) assemble the organ, closing
+in a genome-derived vertebrate grown from a single cell.
+
+| Module | Role |
+|--------|------|
+| `medic/differentiation_clock.py` | The mechanism clock (telomere→PRC2 + Hox); adds the guarded measured multi-organ clock |
+| `medic/encode_opening_time_clock.py`, `encode_temporal_index.py` | Measured clock: each cell type timed by its marker-enhancer opening (ENCODE fetal atlas), 38 cell types across 11 organs |
+| `medic/organ_execution.py` | Integrated per-organ forward pass: connexin frame → morphogen spacing → lateral-inhibition discretization → cadherin cohesion |
+| `medic/hox_boundary.py` | Anterior-posterior address read from the genome (single-cell Hox posterior boundary, ρ = 0.81) |
+| `medic/placement_3d.py` | Organ placement on the 3-D electric-body frame (gap-junction eigenmodes = body axes) |
+| `medic/vertebrate_growth.py` | The assembled vertebrate (whole + cutaway of the derived organs) |
+| `medic/vertebrate_grand.py` | The grand single-panel vertebrate render (~20k cells, limbs, organs) |
+
 ## Install
 
 ```bash
@@ -261,6 +292,9 @@ See [`CITATION.cff`](CITATION.cff).
 
 > Jacobs, M. B. (2026). *Cognitive Biology: Computing the Embryo.* Zenodo.
 > https://doi.org/10.5281/zenodo.21221930
+
+> Jacobs, M. B. (2026). *Cognitive Biology: Differentiation Clocks, Organ
+> Formation and the MLP.* Zenodo. https://doi.org/10.5281/zenodo.21322049
 
 ## License
 

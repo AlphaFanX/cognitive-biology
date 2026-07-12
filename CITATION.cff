@@ -29,8 +29,8 @@ keywords:
   - developmental clock
   - low-rank adaptation
 license: MIT
-version: "1.4"
-date-released: 2026-07-06
+version: "1.5"
+date-released: 2026-07-12
 references:
   - type: article
     title: "Cognitive Biology: Perceptrons and Morphogen Primordia"
@@ -77,3 +77,12 @@ references:
     doi: 10.5281/zenodo.21221930
     year: 2026
     notes: "Embryo-computation companion paper (Paper #6); its code is included in this repository."
+  - type: article
+    title: "Cognitive Biology: Differentiation Clocks, Organ Formation and the MLP"
+    authors:
+      - family-names: Jacobs
+        given-names: "Miles B."
+        affiliation: "genetec.io, Cape Town, South Africa"
+    doi: 10.5281/zenodo.21322049
+    year: 2026
+    notes: "Differentiation-clock and organ-formation companion paper (Paper #8); its code is included in this repository."

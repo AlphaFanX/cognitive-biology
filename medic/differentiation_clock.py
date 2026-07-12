@@ -156,12 +156,26 @@ def main():
         emit_rows.append(dict(time=t, hpf=TIME_HPF[t], prc2=prc, frac_unlocked=frac_unlocked, corr_vs_atlas=corr))
         print(f"    {t:8s} PRC2={prc:.2f}  fates unlocked {frac_unlocked*100:4.0f}%  field corr vs atlas {corr if corr==corr else float('nan'):.2f}")
 
+    # (5) MEASURED MULTI-ORGAN CLOCK (mouse ENCODE opening time) -- guarded, additive.
+    # The zebrafish PRC2 clock above orders fates from mechanism. This adds an INDEPENDENT,
+    # MEASURED developmental clock: each cell type is timed by when its marker enhancers open
+    # in its own fetal tissue (ENCODE mouse fetal atlas, E11.5-E15.5). It corroborates the
+    # clock principle cross-species and is the scaffold for tracing every cell type and, by
+    # aggregation, the organs they build. Network-dependent, so it is wrapped: failure here
+    # never disturbs the core clock the viewer consumes.
+    ct_rows = None
+    try:
+        from medic.encode_opening_time_clock import run_cell_type_organ_timing
+        ct_rows, _ct_val = run_cell_type_organ_timing()
+    except Exception as e:
+        print(f"\n(5) MEASURED MULTI-ORGAN CLOCK -- skipped ({repr(e)[:90]})")
+
     _figure(common, first_seen, pred_unlock, rho, TIMES, hox_stage, clock_open, rho_hox,
             hp, ha, auc, emit_rows)
     json.dump(dict(temporal_rho=rho, temporal_p=p, hox_temporal_rho=rho_hox,
                    hox_auc=auc, spinal_hox=float(hp.mean()), anterior_hox=float(ha.mean()),
                    first_seen=first_seen, pred_unlock=pred_unlock,
-                   emit=emit_rows, n_post_hox=n_post),
+                   emit=emit_rows, n_post_hox=n_post, measured_multi_organ=ct_rows),
               open(OUT / "differentiation_clock.json", "w"), indent=2)
     print("\nsaved", OUT / "differentiation_clock.json")
     print(f"\nSUMMARY: temporal order rho={rho:.2f}, Hox-clock rho={rho_hox:.2f}, "

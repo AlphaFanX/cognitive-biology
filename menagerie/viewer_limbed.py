@@ -36,19 +36,24 @@ LIMB = FIDX["Limb Bud"]
 
 
 def grow_species(g, seed=0, n_render=14000):
+    from medic.limb_shape import shape
+    from medic.limb_genome_frame import genome_limb_frame
     ce = species_convergent_ext(g)
     frames, _ = ue.simulate(use_ecm=True, seed=seed, limb_buds=True, convergent_ext=ce)
     born, t, prc2, P, V, F = frames[-1]
     Ps, Vs, Fs = ue._symmetrize(P, V, F)          # bilateral mirror across the midline
     Ps = species_deform(Ps, g)                    # von Baer: late species proportions
+    gf = genome_limb_frame(ce)
+    Ps, seg = shape(Ps, Fs, LIMB, gf["fore_ap"], gf["hind_ap"])   # tighten body+limbs + PD segments
     if len(Ps) > n_render:
         sel = np.random.default_rng(0).choice(len(Ps), n_render, replace=False)
-        Ps, Fs = Ps[sel], Fs[sel]
+        Ps, Fs, seg = Ps[sel], Fs[sel], seg[sel]
     # atlas (x fore-aft, y dorsoventral, z mediolateral) -> three.js (y up)
     xyz = np.stack([Ps[:, 0], Ps[:, 1], Ps[:, 2]], 1)
     xyz = xyz - xyz.mean(0)
     return {"xyz": [round(float(v), 3) for v in xyz.ravel()],
             "fate": [int(x) for x in Fs],
+            "seg": [int(x) for x in seg],
             "nlimb": int((Fs == LIMB).sum()),
             "conv_ext": round(float(ce), 2),
             "body_plan": getattr(g, "body_plan", "tetrapod")}
@@ -80,6 +85,7 @@ rn.setPixelRatio(devicePixelRatio);document.body.appendChild(rn.domElement);
 sc.add(new THREE.AmbientLight(0xffffff,1));
 const ct=new OrbitControls(cam,rn.domElement);ct.enableDamping=true;ct.autoRotate=true;ct.autoRotateSpeed=0.9;
 const LIMB=__LIMB__, ANAT=DATA.anat;let pts=[];
+const SEGC=[[0.12,0.45,0.92],[0.16,0.82,0.36],[0.97,0.66,0.16]];  // stylopod / zeugopod / autopod
 function acol(f){return ANAT[f]||[0.7,0.72,0.76];}
 function mk(p,c,s){const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
@@ -90,7 +96,7 @@ function show(name){
   const d=DATA.sp[name];const N=d.fate.length;const bp=[],bc=[],hp=[],hc=[];
   for(let k=0;k<N;k++){const isL=d.fate[k]===LIMB;
     const c=(mode==='anat')?acol(d.fate[k]):[0.6,0.64,0.7];
-    if(hl&&isL){hp.push(d.xyz[3*k],d.xyz[3*k+1],d.xyz[3*k+2]);hc.push(0.16,0.86,0.30);}
+    if(hl&&isL){const sg=SEGC[d.seg[k]]||[0.16,0.86,0.30];hp.push(d.xyz[3*k],d.xyz[3*k+1],d.xyz[3*k+2]);hc.push(sg[0],sg[1],sg[2]);}
     else{bp.push(d.xyz[3*k],d.xyz[3*k+1],d.xyz[3*k+2]);bc.push(c[0],c[1],c[2]);}}
   pts=[mk(bp,bc,0.028)];if(hp.length)pts.push(mk(hp,hc,0.060));
   for(const p of pts)sc.add(p);
@@ -98,7 +104,7 @@ function show(name){
   cam.position.set(R*1.4,R*0.6,R*1.8);ct.target.set(0,0,0);
   const tag=d.body_plan==='finned'?'finned — NO limbs (fish)':(d.nlimb+' limb-bud cells (tetrapod)');
   document.getElementById('stat').textContent=name+'  ·  body plan '+d.body_plan+'  ·  Wnt-PCP conv_ext '+d.conv_ext+'  ·  '+tag;}
-const KEY=[['Limb bud','#29db4d'],['Eye','#33d8ff'],['Heart','#ee2938'],['Otic','#ffd23a'],['Neural','#5b78e8'],['Somite/meso','#e69a66']];
+const KEY=[['stylopod','#1f73eb'],['zeugopod','#29d15c'],['autopod','#f7a828'],['Eye','#33d8ff'],['Heart','#ee2938'],['Otic','#ffd23a']];
 document.getElementById('key').innerHTML=KEY.map(k=>`<span><i class="dot" style="background:${k[1]}"></i>${k[0]}</span>`).join('');
 const sel=document.getElementById('sp');
 Object.keys(DATA.sp).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o);});

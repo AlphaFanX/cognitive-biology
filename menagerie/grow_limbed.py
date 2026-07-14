@@ -32,13 +32,17 @@ SHOWN = ["giraffe", "elephant", "human_male", "zebrafish"]
 
 def grow(sp, seed=0):
     import medic.unified_embryo as ue
+    from medic.limb_shape import shape
+    from medic.limb_genome_frame import genome_limb_frame
     g = reference_genome(sp)
     ce = species_convergent_ext(g)
     frames, _ = ue.simulate(use_ecm=True, seed=seed, limb_buds=True, convergent_ext=ce)
     b, t, pr, P, V, F = frames[-1]
     Ps, Vs, Fs = ue._symmetrize(P, V, F)        # bilateral fold -> four symmetric limbs
     pos = species_deform(Ps, g)                 # von Baer: late species deformation (proportions)
-    return pos, Fs, g
+    gf = genome_limb_frame(ce)
+    pos, seg = shape(pos, Fs, LIMB, gf["fore_ap"], gf["hind_ap"])   # tighten + PD segments
+    return pos, Fs, seg, g
 
 
 def main():
@@ -48,8 +52,9 @@ def main():
 
     fig = plt.figure(figsize=(4.3 * len(SHOWN), 5.2))
     rows = []
+    SEGC = ["#1f73eb", "#29d15c", "#f7a828"]     # stylopod / zeugopod / autopod
     for i, sp in enumerate(SHOWN):
-        pos, fid, g = grow(sp)
+        pos, fid, seg, g = grow(sp)
         ce = species_convergent_ext(g)
         islimb = fid == LIMB
         nlimb = int(islimb.sum())
@@ -60,9 +65,10 @@ def main():
         ax = fig.add_subplot(1, len(SHOWN), i + 1, projection="3d")
         body = ~islimb
         ax.scatter(pos[body, 0], pos[body, 1], pos[body, 2], c="0.72", s=3, alpha=0.5, linewidths=0)
-        if nlimb:
-            ax.scatter(pos[islimb, 0], pos[islimb, 1], pos[islimb, 2],
-                       c="#22c55e", s=9, alpha=0.95, linewidths=0)
+        for si in range(3):
+            mm = islimb & (seg == si)
+            if mm.any():
+                ax.scatter(pos[mm, 0], pos[mm, 1], pos[mm, 2], c=SEGC[si], s=9, alpha=0.95, linewidths=0)
         tag = "finned — NO limbs" if bp == "finned" else f"{nlimb} limb-bud cells"
         ax.set_title(f"{sp.replace('_', ' ')}\n{bp} · conv_ext {ce:.2f} · {tag}", fontsize=10)
         ax.set_box_aspect((np.ptp(pos[:, 0]), np.ptp(pos[:, 1]) + 1e-3, np.ptp(pos[:, 2]) + 1e-3), zoom=1.5)

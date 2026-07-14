@@ -1,0 +1,24 @@
+{
+  "hox_forelimb_ap": 0.4563,
+  "hox_hindlimb_ap": 0.7533,
+  "wnt_pcp_genes": [
+    "VANGL2",
+    "WNT5A",
+    "FZD7"
+  ],
+  "wnt_pcp_tone": 0.04873,
+  "wnt_pcp_per_gene": {
+    "WNT5A": 0.03695,
+    "FZD7": 0.07895,
+    "VANGL2": 0.0303
+  },
+  "wnt_pcp_enhancer_counts": {
+    "WNT5A": 551,
+    "FZD7": 463,
+    "VANGL2": 325
+  },
+  "fish_convergent_ext": 3.5949,
+  "zebrafish_pcp_enrichment": 3.5767,
+  "mouse_pcp_enrichment": 0.9949,
+  "source": "Hox: body_plan_morphogenesis.hox_limb_levels (Hox6/Hox10 colinearity); width base: ABC.Score of VANGL2/WNT5A/FZD7 (Wnt-PCP module, human hg38); fish contrast: Wnt-PCP module enrichment ZESTA(zebrafish)/MOSTA(mouse)"
+}

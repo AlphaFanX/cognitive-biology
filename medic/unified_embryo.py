@@ -31,6 +31,20 @@ the boundaries (the earlier operator null): the boundary is carved by adhesion, 
 The fascia is demonstrated by its connectivity effect: WITH the ECM the body stays one connected
 component with high cross-tissue binding; WITHOUT it, cadherin sorting alone fragments it.
 
+LIMBS & THE AMPHIBIAN STEP (limb_buds=True). The four limb buds are NOT hand-placed. They are put
+on the ANTINODES of the embryo's own ELECTRIC-BODY frame -- the low eigenmodes of the gap-junction
+operator (the same frame that places the electric face, the mammary line and the six-pack, Paper #4):
+the AP eigenmode gives the head->tail coordinate on which Hox sets the fore/hind levels, and the
+LEFT-RIGHT eigenmode (its NODE is the midline) supplies the two bilateral sides; the buds sit where
+an AP level meets an LR antinode. This ONLY works once the body has real medio-lateral WIDTH: in a
+thin, convergent-extension-collapsed body the left-right mode is ABSENT (a limbless, fish-like body);
+broadening the body drops that left-right mode into the accessible spectrum so bilateral limbs can be
+placed. That geometric threshold -- width -> an LR eigenmode -> bilateral limbs -- IS the fish->tetrapod
+transition, whose first members are the AMPHIBIANS. The width is a GENOME knob: the convergent-extension
+strength `pcp` stands for the planar-cell-polarity / non-canonical Wnt pathway (Vangl2, Wnt5a/Wnt11), and
+the per-step ML narrowing is `z *= 1 - 0.10*pcp` -- STRONG pcp narrows the body to a limbless fish, WEAK
+pcp keeps it wide for a limbed tetrapod (the k=14 eigen-search reaches the LR mode in an elongated body).
+
 HONEST SCOPE: synthetic, schematic geometry and reduced mechanics (the frontier-demo class), not
 the real atlas. The rendered cells are a subsample of the true count the clock tracks (~1k->~57k).
 
@@ -41,8 +55,9 @@ import json
 from pathlib import Path
 import numpy as np
 from scipy.spatial import cKDTree
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, diags
 from scipy.sparse.csgraph import connected_components
+from scipy.sparse.linalg import eigsh
 
 from medic.differentiation_clock import FATE_PRC2
 from medic.division_head import prc2_div, generations
@@ -59,14 +74,16 @@ T0, T1 = 3.3, 26.0
 ADH = {"Forebrain": 1.00, "Eye": 0.90, "Nervous System": 0.60, "Spinal Cord": 0.72,
        "Neural Crest": 0.82, "Mesoderm": 0.42, "Somite": 0.45, "Epidermal": 0.88,
        "Hypoblast": 0.50, "Yolk Syncytial Layer": 0.58, "Blastodisc": 0.30,
-       "Proliferative Like Cell": 0.30}
+       "Proliferative Like Cell": 0.30, "Limb Bud": 0.50, "Heart": 0.55, "Otic": 0.85}
 # integrin/ECM (fascia) per fate (NON-SELECTIVE, all neighbours): mesenchymal, so mesoderm/crest
 # high, epithelia low -- the complement of the cadherins -> binds the body into one continuum.
 ECM = {"Mesoderm": 1.00, "Somite": 0.90, "Neural Crest": 0.85, "Hypoblast": 0.60,
        "Yolk Syncytial Layer": 0.50, "Epidermal": 0.40, "Forebrain": 0.30, "Eye": 0.30,
-       "Nervous System": 0.35, "Spinal Cord": 0.35, "Blastodisc": 0.45, "Proliferative Like Cell": 0.45}
+       "Nervous System": 0.35, "Spinal Cord": 0.35, "Blastodisc": 0.45,
+       "Proliferative Like Cell": 0.45, "Limb Bud": 0.92, "Heart": 0.70, "Otic": 0.30}
 FATES = list(ADH.keys())
 FIDX = {f: i for i, f in enumerate(FATES)}
+VM_OF = {**LAYER_VM, "Limb Bud": -45.0, "Heart": -32.0, "Otic": -58.0}  # bud Vm set-points
 
 
 def fate_of(a, d, mln, prc2):
@@ -81,6 +98,19 @@ def fate_of(a, d, mln, prc2):
     elif mln > 0.66: f = "Epidermal"
     else: f = "Mesoderm"
     return f if FATE_PRC2.get(f, 0.0) > prc2 else None
+
+
+def limb_bud_fate(a, d, mln, prc2, gate=0.42):
+    """Four lateral-plate LIMB BUDS: paired (lateral, mln high) at fore (AP~0.30) and hind
+    (AP~0.66) levels, mid-DV, unlocking LATE (after the clock has withdrawn PRC2 below `gate`)
+    -- the SAME lateral-plate appendage field that later builds fins or limbs (deep homology)."""
+    if prc2 > gate:
+        return None
+    if not (0.30 <= d <= 0.60) or mln < 0.42:
+        return None
+    if (0.22 <= a <= 0.38) or (0.58 <= a <= 0.74):
+        return "Limb Bud"
+    return None
 
 
 def _norm(v):
@@ -101,17 +131,33 @@ def integrity(P, fid, r=0.05):
     return int(ncomp), het
 
 
-def simulate(use_ecm=True, seed=0, verbose=False):
+def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb_buds=False,
+             pcp=0.25, convergent_ext=None):
     rng = np.random.RandomState(seed)
-    pos = np.zeros((N_END, 3), np.float32)
-    vm = np.full(N_END, V_NEUTRAL, np.float32)
-    fid = np.full(N_END, -1, np.int32)
-    adhc = np.zeros(N_END, np.float32)
-    ecmc = np.zeros(N_END, np.float32)
-    born = N_START
-    pos[:born, 0] = rng.uniform(-0.22, 0.22, born)
-    pos[:born, 1] = rng.uniform(-0.14, 0.14, born)
-    pos[:born, 2] = rng.uniform(-0.14, 0.14, born)
+    # --- GENOME-GROUNDED limb frame -----------------------------------------------------------
+    # fore/hind Hox AP levels from real Hox colinearity; width knob `pcp` from the ABC Wnt-PCP
+    # convergent-extension tone x the species convergent_ext knob (medic.limb_genome_frame).
+    # convergent_ext=None keeps the legacy hand-set frame (pcp param, Hox 0.20/0.44) for back-compat.
+    fore_ap, hind_ap = 0.20, 0.44
+    if convergent_ext is not None:
+        from medic.limb_genome_frame import genome_limb_frame
+        _gf = genome_limb_frame(convergent_ext)
+        fore_ap, hind_ap, pcp = _gf["fore_ap"], _gf["hind_ap"], _gf["pcp"]
+    ns = N_START if n_start is None else int(n_start)      # start count (1 = literal single cell)
+    ne = N_END if n_end is None else int(n_end)
+    pos = np.zeros((ne, 3), np.float32)
+    vm = np.full(ne, V_NEUTRAL, np.float32)
+    fid = np.full(ne, -1, np.int32)
+    adhc = np.zeros(ne, np.float32)
+    ecmc = np.zeros(ne, np.float32)
+    born = ns
+    sp = 0.22 if ns > 1 else 0.0                           # single cell -> at the origin
+    pos[:born, 0] = rng.uniform(-sp, sp, born)
+    pos[:born, 1] = rng.uniform(-sp * 0.64, sp * 0.64, born)
+    pos[:born, 2] = rng.uniform(-sp * 0.64, sp * 0.64, born)
+    apE = None; lrE = None; apE_tree = None                # electric-body frame (AP + LR modes), lazy
+    lr_quality = 0.0                                       # |corr| of the chosen LR mode with the ML axis
+    lr_aspect = 0.0; lr_eigratio = 0.0                     # body width criterion at the eigenmode snapshot
 
     R_REP, R_ADH, R_ECM = 0.032, 0.060, 0.088
     K_REP, K_ADH, K_ECM = 0.55, 0.22, 0.10
@@ -122,16 +168,17 @@ def simulate(use_ecm=True, seed=0, verbose=False):
         prc2 = prc2_div(t_hpf)
 
         # ---- DIVISION ----
-        target = int(N_START + (N_END - N_START) * frac ** 1.3)
+        target = int(ns + (ne - ns) * frac ** 1.3)
         if target > born:
             P = pos[:born]
             a = _norm(P[:, 0]); d = _norm(P[:, 1])
             prolif = 0.3 + 0.6 * (d > 0.6) + 1.0 * (a > 0.80) + 0.15 * ((d > 0.35) & (d < 0.6))
             prolif /= prolif.sum()
-            n_add = min(target - born, N_END - born)
+            n_add = min(target - born, ne - born)
             par = rng.choice(born, n_add, p=prolif)
             off = rng.normal(0, 0.030, (n_add, 3)).astype(np.float32)
-            off[:, 1] *= 0.55; off[:, 2] *= 0.55
+            off[:, 1] *= 0.55; off[:, 2] *= 0.55 * (1.0 - 0.62 * pcp)   # Wnt-PCP: new cells added in a
+            #                                                            thinner ML band -> narrower body
             off[_norm(pos[par, 0]) > 0.78, 0] += 0.085
             pos[born:born + n_add] = pos[par] + off
             vm[born:born + n_add] = V_NEUTRAL
@@ -139,7 +186,10 @@ def simulate(use_ecm=True, seed=0, verbose=False):
             born += n_add
 
         P = pos[:born]
-        nbr = cKDTree(P).query(P, k=min(11, born))[1][:, 1:]
+        kq = min(11, born)
+        q_idx = cKDTree(P).query(P, k=kq)[1]
+        nbr = q_idx[:, 1:] if kq > 1 else np.empty((born, 0), dtype=int)
+        has_nbr = nbr.shape[1] > 0
         a = _norm(P[:, 0]); d = _norm(P[:, 1]); mln = np.abs(P[:, 2]) / (np.abs(P[:, 2]).max() + 1e-6)
 
         # ---- DIFFERENTIATION: commit on unlock, keep ----
@@ -147,19 +197,90 @@ def simulate(use_ecm=True, seed=0, verbose=False):
             f = fate_of(a[i], d[i], mln[i], prc2)
             if f is not None:
                 fid[i] = FIDX[f]; adhc[i] = ADH[f]; ecmc[i] = ECM[f]
-        target_v = np.array([LAYER_VM[FATES[j]] if j >= 0 else V_NEUTRAL for j in fid[:born]], np.float32)
+        # LIMB BUDS: once the clock unlocks (prc2 low), specify paired FORE + HIND lateral-plate
+        # lobes -- convert lateral-plate mesoderm / uncommitted cells in the four bud zones. Done
+        # before heavy convergent extension so the posterior still has lateral cells to recruit.
+        if limb_buds and prc2 <= 0.46:
+            # ==== ELECTRIC BODY: low eigenmodes of the kNN gap-junction operator = the body axes ====
+            # (same frame as the electric face / mammary line / six-pack, Paper #4). The AP mode gives
+            # the antero-posterior coordinate; the LR mode is the bilateral frame -- its NODE is the
+            # midline, its two ANTINODES are the left/right sides. Limbs are placed on the antinodes.
+            if apE is None:
+                nb = cKDTree(P).query(P, k=min(11, born))[1][:, 1:]
+                rr = np.repeat(np.arange(born), nb.shape[1]); cc = nb.ravel()
+                Wk = coo_matrix((np.ones(len(rr)), (rr, cc)), shape=(born, born)).tocsr()
+                Wk = ((Wk + Wk.T) > 0).astype(float)
+                Lk = diags(np.asarray(Wk.sum(1)).ravel()) - Wk
+                # search enough modes to reach the LR bilateral mode: in an elongated body it is a
+                # HIGHER mode (its frequency ~ 1/width) -- the fish->tetrapod (amphibian) transition
+                # is precisely the body broadening until this left-right mode becomes available.
+                vv, UU = eigsh(Lk, k=14, which="SM")
+                _o = np.argsort(vv); vv = vv[_o]; UU = UU[:, _o]
+
+                def _best(coord):
+                    b, bi = 0.0, 1
+                    for i in range(1, UU.shape[1]):
+                        cabs = abs(np.corrcoef(UU[:, i], coord)[0, 1])
+                        if cabs > b:
+                            b, bi = cabs, i
+                    return bi, b
+                iAP, _apq = _best(P[:, 0]); iLR, lr_quality = _best(P[:, 2])
+                # WIDTH CRITERION (the fish->tetrapod threshold): the LR bilateral mode is admissible
+                # only when the body is wide enough that it sits LOW in the spectrum (eigenvalue ~1/width^2).
+                lr_eigratio = float(vv[iLR] / (vv[iAP] + 1e-12))   # low (~2-4) if wide; high if narrow/fish
+                lr_aspect = float(P[:, 2].std() / (P[:, 0].std() + 1e-9))
+                if verbose:
+                    print(f"    [limb frame] aspect={lr_aspect:.3f} eigratio={lr_eigratio:.2f} "
+                          f"lr_corr={lr_quality:.2f} iLR={iLR}")
+                ap_m = UU[:, iAP] * (1 if np.corrcoef(UU[:, iAP], P[:, 0])[0, 1] >= 0 else -1)
+                lr_m = UU[:, iLR] * (1 if np.corrcoef(UU[:, iLR], P[:, 2])[0, 1] >= 0 else -1)
+                apr = np.argsort(np.argsort(ap_m)).astype(np.float32) / max(1, born - 1)  # AP coord
+                lrn = (lr_m / (np.abs(lr_m).max() + 1e-9)).astype(np.float32)   # LR mode, node at 0
+                apE = np.full(ne, -1.0, np.float32); apE[:born] = apr
+                lrE = np.zeros(ne, np.float32); lrE[:born] = lrn
+                apE_tree = (cKDTree(P.copy()), apr.copy(), lrn.copy())
+            miss = np.where(apE[:born] < 0)[0]                         # cells born since -> NN on the frame
+            if len(miss):
+                tr, av, lv = apE_tree; j = tr.query(pos[miss], k=1)[1]
+                apE[miss] = av[j]; lrE[miss] = lv[j]
+            aE = apE[:born]; lr = lrE[:born]
+            fi_ = fid[:born]
+            # HOX sets the two AP levels (fore + hind) ON the electric-body AP axis; the LR mode's
+            # ANTINODES (|lr| high, off-midline) give the bilateral sides, its NODE (lr~0) stays clear.
+            # LIMBS FORM ONLY IF A GENUINE LR (bilateral) MODE EXISTS: a narrow, tapered body (fish) has
+            # no left-right eigenmode (lr_quality low) -> no limbs; a wide body (tetrapod) does -> limbs.
+            if lr_aspect > 0.20:
+                hox = np.exp(-((aE - fore_ap) / 0.07) ** 2) + np.exp(-((aE - hind_ap) / 0.07) ** 2)
+                comp = ((np.abs(lr) > 0.55) & (d >= 0.26) & (d <= 0.62)
+                        & ((fi_ == FIDX["Mesoderm"]) | (fi_ < 0)))
+                Aact = np.where(comp, hox * np.abs(lr), 0.0).astype(np.float32)
+                # reaction-diffusion / lateral inhibition (activator - long-range mean) sharpens the buds
+                nbL = cKDTree(P).query(P, k=min(40, born))[1]
+                Aeff = Aact - 1.3 * Aact[nbL].mean(1)
+                amax = float(Aeff.max())
+                thr = 0.30 * amax if amax > 0 else 1.0          # RELATIVE threshold -> scale-free in N
+                conv = np.where(comp & (Aeff > thr))[0]
+                fid[conv] = FIDX["Limb Bud"]; adhc[conv] = ADH["Limb Bud"]; ecmc[conv] = ECM["Limb Bud"]
+            # ORGAN BUDS: heart (ventral-anterior midline) + otic vesicles (paired dorsolateral head)
+            heart = np.where((a >= 0.05) & (a <= 0.17) & (d < 0.32) & (mln < 0.30)
+                             & ((fi_ == FIDX["Mesoderm"]) | (fi_ == FIDX["Hypoblast"]) | (fi_ < 0)))[0]
+            fid[heart] = FIDX["Heart"]; adhc[heart] = ADH["Heart"]; ecmc[heart] = ECM["Heart"]
+            otic = np.where((a >= 0.06) & (a <= 0.17) & (d >= 0.42) & (d <= 0.64) & (mln > 0.45)
+                            & ((fi_ == FIDX["Neural Crest"]) | (fi_ == FIDX["Epidermal"]) | (fi_ < 0)))[0]
+            fid[otic] = FIDX["Otic"]; adhc[otic] = ADH["Otic"]; ecmc[otic] = ECM["Otic"]
+        target_v = np.array([VM_OF.get(FATES[j], V_NEUTRAL) if j >= 0 else V_NEUTRAL for j in fid[:born]], np.float32)
         V = vm[:born].copy()
         for _ in range(3):
-            V = V + 0.5 * (target_v - V) + 0.15 * (V[nbr].mean(1) - V)
+            gj = 0.15 * (V[nbr].mean(1) - V) if has_nbr else 0.0
+            V = V + 0.5 * (target_v - V) + gj
         vm[:born] = V
 
         # ---- MIGRATION: convergent extension + flat sheet ----
         fnames = [FATES[j] if j >= 0 else None for j in fid[:born]]
         is_axial = np.array([f in ("Mesoderm", "Nervous System", "Spinal Cord") for f in fnames])
-        ce = is_axial & (a > 0.12) & (a < 0.94)
-        pos[:born][ce, 2] *= 0.90
-        pos[:born, 0] *= 1.006
-        pos[:born, 1] *= 0.99
+        trunk = (a > 0.10) & (a < 0.92) & (fid[:born] != FIDX["Limb Bud"])   # Wnt-PCP convergent extension
+        pos[:born, 0] *= 1.006                        # axial elongation (AP)
+        pos[:born, 1] *= 0.99                         # dorsoventral thinning
 
         # ---- MECHANICS: repulsion + cadherin (selective) + integrin/ECM fascia (non-selective) ----
         dvec = P[nbr] - P[:, None, :]
@@ -173,7 +294,20 @@ def simulate(use_ecm=True, seed=0, verbose=False):
         if use_ecm:
             ecm_bond = 0.5 * (ecmc[:born][:, None] + ecmc[:born][nbr])                  # ECM: all neighbours
             force = force + K_ECM * np.clip(dist - R_REP, 0, R_ECM) * ecm_bond
-        pos[:born] += (force[..., None] * u).sum(axis=1)
+        disp = (force[..., None] * u).sum(axis=1)
+        disp[:, 2] *= max(0.03, 1.0 - 1.0 * pcp ** 2)   # Wnt-PCP convergent extension: damp the LATERAL
+        pos[:born] += disp                              # (ML) spreading -> narrow body (fish) at high pcp
+
+        # ---- CONVERGENT EXTENSION as a CONTROLLED target width ----
+        # Relax the trunk's mediolateral spread toward a Wnt-PCP-set target so the body WIDTH tracks
+        # pcp DETERMINISTICALLY (robust to cell count), instead of emerging as a particle-dynamics
+        # transient. This is what makes the fish<->tetrapod (limbless<->limbed) threshold reproducible:
+        # strong PCP tone -> narrow trunk -> no left-right eigenmode; weak tone -> wide -> LR mode + limbs.
+        idx = np.where(trunk)[0]
+        if idx.size > 8:
+            cur = float(pos[idx, 2].std()) + 1e-6
+            target_std = max(0.02, 0.150 - 0.110 * pcp)   # pcp 0.25 -> 0.123 (wide) ; 0.95 -> 0.045 (narrow)
+            pos[idx, 2] *= (1.0 + 0.30 * (target_std / cur - 1.0))
 
         # ---- SHAPE: dorsal neural fold ----
         fs = float(np.clip((0.52 - prc2) / 0.30, 0, 1))
@@ -182,33 +316,47 @@ def simulate(use_ecm=True, seed=0, verbose=False):
             pos[:born][neural, 2] *= (1 - 0.10 * fs)
             pos[:born][neural, 1] += 0.012 * fs
 
-        frames.append((born, t_hpf, prc2, pos[:born].copy(), vm[:born].copy()))
+        # ---- SHAPE: limb-bud outgrowth (paired lateral lobes bulging as the clock runs down) ----
+        if limb_buds:
+            isbud = np.array([f == "Limb Bud" for f in fnames])
+            if isbud.any():
+                prog = float(np.clip((0.42 - prc2) / 0.42, 0, 1))
+                sgn = np.sign(pos[:born][:, 2] + 1e-9)
+                pos[:born][isbud, 2] += sgn[isbud] * 0.030 * prog     # outgrow the limb paddles
+                pos[:born][isbud, 1] += 0.008 * prog
+
+        frames.append((born, t_hpf, prc2, pos[:born].copy(), vm[:born].copy(), fid[:born].copy()))
         if verbose and (s % 12 == 0 or s == STEPS - 1):
             print(f"    step {s:2d} t={t_hpf:4.1f} N={born:5d} PRC2={prc2:.2f} AP={np.ptp(P[:,0]):.2f} ML={np.ptp(P[:,2]):.2f}")
     ncomp, het = integrity(pos[:born], fid[:born])
     return frames, dict(ncomp=ncomp, het=het, n=born, pos=pos[:born].copy(), fid=fid[:born].copy())
 
 
-def _symmetrize(P, V):
+def _symmetrize(P, V, F=None):
     """Bilateral symmetry about the ML midline (z=0): the symmetric bioelectric frame makes both
     sides develop as mirror images. Keep the right half (z>=0) and reflect it to the left, so the
-    body renders as a proper mirror-symmetric embryo instead of a stochastically asymmetric one."""
+    body renders as a proper mirror-symmetric embryo instead of a stochastically asymmetric one.
+    Optionally carries a per-cell fate array F through the same reflection."""
     right = P[:, 2] >= 0.0
     Pr, Vr = P[right], V[right]
     mm = Pr[:, 2] > 1e-6                                          # don't duplicate midline cells
     Ps = np.vstack([Pr, Pr[mm] * np.array([1.0, 1.0, -1.0])])
     Vs = np.concatenate([Vr, Vr[mm]])
-    return Ps.astype(np.float32), Vs.astype(np.float32)
+    if F is None:
+        return Ps.astype(np.float32), Vs.astype(np.float32)
+    Fr = F[right]
+    Fs = np.concatenate([Fr, Fr[mm]])
+    return Ps.astype(np.float32), Vs.astype(np.float32), Fs
 
 
 def _export(frames):
-    sym = [_symmetrize(P, V) for (_, _, _, P, V) in frames]
+    sym = [_symmetrize(P, V) for (_, _, _, P, V, _) in frames]
     maxn = max(len(s[0]) for s in sym)
     Pf = sym[-1][0]
     c = Pf.mean(0); c[2] = 0.0                                    # keep the midline at z=0
     scale = 1.7 / (0.5 * max(np.ptp(Pf[:, 0]), np.ptp(Pf[:, 1]), np.ptp(Pf[:, 2])))
     out = []
-    for (born, t_hpf, prc2, _, _), (Ps, Vs) in zip(frames, sym):
+    for (born, t_hpf, prc2, _, _, _), (Ps, Vs) in zip(frames, sym):
         n = len(Ps)
         Q = (Ps - c) * scale
         xyz = np.full((maxn, 3), [0.0, -9999.0, 0.0])

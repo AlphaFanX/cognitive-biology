@@ -250,16 +250,41 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
             # LIMBS FORM ONLY IF A GENUINE LR (bilateral) MODE EXISTS: a narrow, tapered body (fish) has
             # no left-right eigenmode (lr_quality low) -> no limbs; a wide body (tetrapod) does -> limbs.
             if lr_aspect > 0.20:
-                hox = np.exp(-((aE - fore_ap) / 0.07) ** 2) + np.exp(-((aE - hind_ap) / 0.07) ** 2)
-                comp = ((np.abs(lr) > 0.55) & (d >= 0.26) & (d <= 0.62)
+                # The electric-body LR eigenmode gates WHETHER limbs form (lr_aspect: only a wide enough
+                # body has the bilateral mode). WHERE they form uses a LOCAL mediolateral coordinate --
+                # |z| relative to the body half-width at each AP slice -- so the lateral plate is found
+                # along the WHOLE trunk despite the anteroposterior taper. Fore/hind = the genome Hox
+                # levels in physical AP; left/right = the two sides -> the tetrapod's four limbs.
+                apb = np.clip((a * 24).astype(int), 0, 23)
+                locmax = np.ones(24, np.float32)
+                for k in range(24):
+                    mk = apb == k
+                    if mk.sum() > 3:
+                        locmax[k] = float(np.abs(P[mk, 2]).max()) + 1e-6
+                mll = np.abs(P[:, 2]) / locmax[apb]                 # 0 midline .. 1 local lateral edge
+                # the two genome Hox levels (physical AP) define two narrow competence BANDS with a GAP
+                # between them, so a fore and a hind field are distinct along the axis to begin with.
+                hox = np.exp(-((a - fore_ap) / 0.055) ** 2) + np.exp(-((a - hind_ap) / 0.055) ** 2)
+                comp = ((mll > 0.55) & (d >= 0.26) & (d <= 0.62) & (hox > 0.40)
                         & ((fi_ == FIDX["Mesoderm"]) | (fi_ < 0)))
-                Aact = np.where(comp, hox * np.abs(lr), 0.0).astype(np.float32)
-                # reaction-diffusion / lateral inhibition (activator - long-range mean) sharpens the buds
-                nbL = cKDTree(P).query(P, k=min(40, born))[1]
-                Aeff = Aact - 1.3 * Aact[nbL].mean(1)
-                amax = float(Aeff.max())
-                thr = 0.30 * amax if amax > 0 else 1.0          # RELATIVE threshold -> scale-free in N
-                conv = np.where(comp & (Aeff > thr))[0]
+                Aact = np.where(comp, hox * mll, 0.0).astype(np.float32)
+                # LATERAL INHIBITION (reaction-diffusion Mexican hat): activator minus its long-range
+                # neighbourhood mean -> the broad competent lateral plate CONDENSES into four discrete,
+                # spaced limb buds (the tissue between them is inhibited). Same mechanism that resolves
+                # the paired eyes -- without it the buds merge into a connected fin.
+                nbL = cKDTree(P).query(P, k=min(45, born))[1]
+                Aeff = Aact - 1.25 * Aact[nbL].mean(1)
+                apmid = 0.5 * (fore_ap + hind_ap)
+                zc = P[:, 2]
+                conv_parts = []
+                for apm in (a < apmid, a >= apmid):                 # fore (anterior) / hind (posterior)
+                    for side in (zc > 0, zc < 0):                   # left / right
+                        cs = comp & apm & side & (Aeff > 0.0)
+                        if cs.sum() >= 4:
+                            idxq = np.where(cs)[0]
+                            thr = 0.35 * float(Aeff[cs].max())      # keep the sharpened peak = the bud
+                            conv_parts.append(idxq[Aeff[cs] > thr])
+                conv = np.concatenate(conv_parts) if conv_parts else np.array([], dtype=int)
                 fid[conv] = FIDX["Limb Bud"]; adhc[conv] = ADH["Limb Bud"]; ecmc[conv] = ECM["Limb Bud"]
             # ORGAN BUDS: heart (ventral-anterior midline) + otic vesicles (paired dorsolateral head)
             heart = np.where((a >= 0.05) & (a <= 0.17) & (d < 0.32) & (mln < 0.30)
@@ -316,14 +341,21 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
             pos[:born][neural, 2] *= (1 - 0.10 * fs)
             pos[:born][neural, 1] += 0.012 * fs
 
-        # ---- SHAPE: limb-bud outgrowth (paired lateral lobes bulging as the clock runs down) ----
+        # ---- SHAPE: limb-bud OUTGROWTH -- the buds EXTEND into projecting limbs as the clock runs down.
+        # The outgrowth is DISTAL-GRADED: a cell already further from the midline grows out more, so each
+        # bud stretches into a limb that projects laterally and drops ventrally (a proximodistal axis),
+        # rather than a rigid bulge. Accumulates over the remaining steps -> the longer it runs, the
+        # further the limbs extend. Limb COUNT is untouched (set at formation), so the fish stays limbless.
         if limb_buds:
             isbud = np.array([f == "Limb Bud" for f in fnames])
             if isbud.any():
                 prog = float(np.clip((0.42 - prc2) / 0.42, 0, 1))
+                bz = np.abs(pos[:born][:, 2])
+                u = bz / (bz[isbud].max() + 1e-9)                     # proximal 0 .. distal 1 within the limb
+                grow = (0.30 + 0.70 * u) * prog                      # distal cells extend more (proximodistal)
                 sgn = np.sign(pos[:born][:, 2] + 1e-9)
-                pos[:born][isbud, 2] += sgn[isbud] * 0.030 * prog     # outgrow the limb paddles
-                pos[:born][isbud, 1] += 0.008 * prog
+                pos[:born][isbud, 2] += sgn[isbud] * 0.150 * grow[isbud]   # project laterally
+                pos[:born][isbud, 1] -= 0.095 * grow[isbud]               # drop ventrally -> a limb
 
         frames.append((born, t_hpf, prc2, pos[:born].copy(), vm[:born].copy(), fid[:born].copy()))
         if verbose and (s % 12 == 0 or s == STEPS - 1):
@@ -334,18 +366,18 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
 
 def _symmetrize(P, V, F=None):
     """Bilateral symmetry about the ML midline (z=0): the symmetric bioelectric frame makes both
-    sides develop as mirror images. Keep the right half (z>=0) and reflect it to the left, so the
-    body renders as a proper mirror-symmetric embryo instead of a stochastically asymmetric one.
-    Optionally carries a per-cell fate array F through the same reflection."""
-    right = P[:, 2] >= 0.0
-    Pr, Vr = P[right], V[right]
-    mm = Pr[:, 2] > 1e-6                                          # don't duplicate midline cells
-    Ps = np.vstack([Pr, Pr[mm] * np.array([1.0, 1.0, -1.0])])
-    Vs = np.concatenate([Vr, Vr[mm]])
+    sides develop as mirror images. FOLD every cell to one half (|z|) and reflect, so structures
+    that grew on EITHER side of the stochastic body -- e.g. a hind limb that happened to form on
+    the left -- are kept and mirrored, giving a proper mirror-symmetric embryo. Optionally carries
+    a per-cell fate array F through the same reflection."""
+    Pf = P.copy()
+    Pf[:, 2] = np.abs(P[:, 2])                                    # fold both sides onto z>=0
+    mm = Pf[:, 2] > 1e-6                                          # don't duplicate midline cells
+    Ps = np.vstack([Pf, Pf[mm] * np.array([1.0, 1.0, -1.0])])
+    Vs = np.concatenate([V, V[mm]])
     if F is None:
         return Ps.astype(np.float32), Vs.astype(np.float32)
-    Fr = F[right]
-    Fs = np.concatenate([Fr, Fr[mm]])
+    Fs = np.concatenate([F, F[mm]])
     return Ps.astype(np.float32), Vs.astype(np.float32), Fs
 
 

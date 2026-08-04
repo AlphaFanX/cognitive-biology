@@ -74,7 +74,7 @@ REFERENCE = {
     # --- the two organisms the NCA+LGM model is TRAINED on (MOSTA / ZESTA atlases) ---
     "mouse": (Genome(               # small quadruped rodent (Mus musculus)
         body_size=0.30, cervical_elong=0.70, trunk_len=1.10, trunk_girth=0.85,
-        tail_len=2.20, tail_count=1.80, limb_len=0.75, limb_gracility=0.60,
+        tail_len=1.40, tail_count=1.20, limb_len=0.85, limb_gracility=0.60,   # moderated tail: mouse-like, not a sparse streak
         skull_size=1.00, snout_len=1.25, neck_raise=0.20,
         coat_type="plain"), (0.58, 0.52, 0.48)),
 

@@ -15,7 +15,7 @@ framework described in the paper. It is **not** the full working tree — only
 the modules that implement the mechanisms and generate the results discussed in
 the manuscript, with no API keys, credentials, or large private data.
 
-It also contains the code for six companion papers: the design paper,
+It also contains the code for seven companion papers: the design paper,
 *Cognitive Biology: Perceptrons and Morphogen Primordia* (see
 [Perceptrons and morphogen primordia](#perceptrons-and-morphogen-primordia-companion-paper));
 the cross-phylum paper, *Cognitive Biology Across Phyla: One Bioelectric
@@ -30,7 +30,9 @@ the embryo-computation paper, *Cognitive Biology: Computing the Embryo* (see
 [Computing the embryo](#computing-the-embryo-companion-paper)); and the
 differentiation-clock paper, *Cognitive Biology: Differentiation Clocks, Organ
 Formation and the MLP* (see
-[Differentiation clocks, organ formation and the MLP](#differentiation-clocks-organ-formation-and-the-mlp-companion-paper)).
+[Differentiation clocks, organ formation and the MLP](#differentiation-clocks-organ-formation-and-the-mlp-companion-paper));
+and the human paper, *Cognitive Biology: The Human Model and the GWAS Scaffold*
+(see [The human model and the GWAS scaffold](#the-human-model-and-the-gwas-scaffold-companion-paper)).
 
 ## The idea in one paragraph
 
@@ -241,6 +243,42 @@ in a genome-derived vertebrate grown from a single cell.
 | `medic/vertebrate_growth.py` | The assembled vertebrate (whole + cutaway of the derived organs) |
 | `medic/vertebrate_grand.py` | The grand single-panel vertebrate render (~20k cells, limbs, organs) |
 
+## The human model and the GWAS scaffold (companion paper)
+
+These modules implement the human companion paper:
+
+> **Cognitive Biology: The Human Model and the GWAS Scaffold**
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.21796907](https://doi.org/10.5281/zenodo.21796907)
+> Manuscript PDF: [`paper/cognitive_biology_7_human.pdf`](paper/cognitive_biology_7_human.pdf)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21796907.svg)](https://doi.org/10.5281/zenodo.21796907)
+
+The mouse compiler is carried to the human as a frozen kernel plus a low-rank
+species adapter, matured toward the adult, and given individual variation by
+the genome-wide association effect sizes written as a bias on the outer model.
+Because the embryo is the cause of the adult, the abundant adult association
+signal is read backward through the forward model to constrain the data-scarce
+embryo, and the whole GWAS Catalog partitions the genome into a conserved
+kernel and an individual adapter.
+
+| Module | Role |
+|--------|------|
+| `medic/mouse_to_human_builder.py`, `zeroshot_mouse_to_human.py`, `humanize_tetrapod.py` | Kernel transfer: a human embryo from the mouse compiler via a low-rank species adapter |
+| `medic/human_movie.py`, `human_dev_montage.py`, `human_adult_annotated.py`, `human_embryo_annotated.py` | The developmental-forward human, grown and matured, with the staged figures |
+| `medic/face_maturation.py`, `face_dematuration.py`, `heart_maturation.py`, `kidney_maturation.py`, `liver_maturation.py`, `eye_maturation.py` | Per-organ allometric maturation operators (run forward and inverted) |
+| `medic/gene_trait_adapter.py` | The individual adapter: each GWAS allele placed at its knob (βₖ·eₖ) |
+| `medic/individual_body.py` | A specific person computed from polygenic-score deviations |
+| `medic/catalog_complete.py` | Completing the adapter from the whole GWAS Catalog (kernel vs adapter partition) |
+| `medic/develop_reverse.py` | The reverse clock: adult → blastocyst → single cell |
+| `medic/surface_metric.py`, `body_surface_generator.py`, `converge_human.py` | Bidirectional Chamfer surface distance and the genome-to-form fit |
+| `medic/vitruvian_annotated_figure.py` | The Vitruvian-canon test: which proportions the catalog resolves |
+| `medic/appendage_spectrum.py` | The hand/foot spectrum: canalised plan over a polygenic surface |
+| `medic/body_plan_generator.py`, `body_plan_absynth.py`, `body_plan_morphogenesis.py` | Whole-body plan via a von Dassow–Odell knob search on the dense silhouette |
+| `medic/alphagenome_face_modularity.py`, `ground_face_betas.py` | Face genetic decoupling (identity signal) and the real Xiong facial GWAS β magnitudes |
+| `medic/organ_modes_physiome.py`, `physiome_conductances.py`, `multi_organ_betse.py` | The Physiome/BETSE function atlas weighting each organ's eigenframe |
+| `face_demo/face_reconstruction.py`, `mesh_morph.py`, `gwas_adapter.py`, `make_figures.py` | Genome→face on the FaceBase mesh (directions from sequence, magnitudes from GWAS) |
+
 ## Install
 
 ```bash
@@ -295,6 +333,9 @@ See [`CITATION.cff`](CITATION.cff).
 
 > Jacobs, M. B. (2026). *Cognitive Biology: Differentiation Clocks, Organ
 > Formation and the MLP.* Zenodo. https://doi.org/10.5281/zenodo.21322049
+
+> Jacobs, M. B. (2026). *Cognitive Biology: The Human Model and the GWAS
+> Scaffold.* Zenodo. https://doi.org/10.5281/zenodo.21796907
 
 ## License
 

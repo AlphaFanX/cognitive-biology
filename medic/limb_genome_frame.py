@@ -128,8 +128,21 @@ def _fish_convergent_ext():
 
 def build_cache():
     """Scan ABC + Hox + the two atlases once and cache the genome reads."""
-    from medic.body_plan_morphogenesis import hox_limb_levels
-    fore, hind = hox_limb_levels(0.0, 1.0)         # genome Hox colinearity
+    # Fore/hind limb AP levels: read from the REAL mouse fossil-record posterior-Hox
+    # ENHANCER archive (Jadhav mm9 LMRs; medic.genome.hox_ap_address) -- forelimb from
+    # the Hox9 enhancer centroid, hindlimb from the Hox10 colinear position. Falls back
+    # to the idealised-human colinearity (hox_limb_levels) only if the Jadhav data is absent.
+    ap_source = "fossil-record posterior-Hox enhancers (Jadhav mm9 Hox9/Hox10 colinearity)"
+    try:
+        from medic.genome.hox_ap_address import limb_ap_from_fossil
+        _ap = limb_ap_from_fossil(0.0, 1.0)
+        fore, hind = _ap["fore_ap"], _ap["hind_ap"]
+        if fore is None or hind is None:
+            raise ValueError("no fossil-record Hox archive")
+    except (ImportError, FileNotFoundError, ValueError, OSError):
+        from medic.body_plan_morphogenesis import hox_limb_levels
+        fore, hind = hox_limb_levels(0.0, 1.0)     # fallback: idealised-human colinearity
+        ap_source = "idealised-human Hox colinearity (fallback; Jadhav data absent)"
     tone, per_gene, enh = _scan_abc_pcp_tone()     # genome Wnt-PCP accessibility (human ABC)
     fish_ce, zf_enr, ms_enr = _fish_convergent_ext()   # measured zebrafish/mouse CE contrast
     out = {
@@ -142,7 +155,7 @@ def build_cache():
         "fish_convergent_ext": fish_ce,          # measured zebrafish/mouse Wnt-PCP ratio (fish contrast)
         "zebrafish_pcp_enrichment": zf_enr,
         "mouse_pcp_enrichment": ms_enr,
-        "source": "Hox: body_plan_morphogenesis.hox_limb_levels (Hox6/Hox10 colinearity); "
+        "source": f"Hox AP: {ap_source}; "
                   "width base: ABC.Score of VANGL2/WNT5A/FZD7 (Wnt-PCP module, human hg38); "
                   "fish contrast: Wnt-PCP module enrichment ZESTA(zebrafish)/MOSTA(mouse)",
     }

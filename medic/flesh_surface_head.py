@@ -1,0 +1,182 @@
+"""
+flesh_surface_head.py -- THE FLESH: drape the skin over the MUSCLE+FAT layer, not the bone.
+
+The Vitruvian proportions are the frame; the flesh is what makes a body appreciable -- the bulge of the biceps,
+the geometry of the six-pack, the flare of the gluteus into the sweep of the quadriceps, the taper of the calf.
+Those are absent when the skin is the envelope of the OUTER cells (bone + skin layer): nothing pushes the skin
+out from underneath. This head fixes that at the source. It gives each muscle a fusiform BELLY with real mass,
+adds a subcutaneous FAT shell that smooths the bellies into a continuous contour (marble, not raw anatomy), and
+computes the skin SURFACE as the envelope of THAT layer -- so the muscle relief reads through the skin.
+
+One mechanism, hundreds of surface-relief metrics (the Economy principle): belly-shaping x fat x skin-over-muscle.
+
+Run: cd cognimed && venv_win_new/Scripts/python.exe -m medic.flesh_surface_head
+Out: data/organ_cascade/flesh_surface_head.png
+"""
+from __future__ import annotations
+import os
+import numpy as np
+from scipy.spatial import cKDTree
+
+from menagerie.targets import reference_genome
+from menagerie.skeleton import build_skeleton
+from menagerie.muscles import build_muscles, render_points as _muscle_pts
+from medic.skin_shell_head import shell, mesh as _skin_mesh
+
+
+def _to_laid(P):
+    """Atlas frame (col2 = height, col1 = ML, col0 = DV) -> laid frame (x=AP/height head+x, y=DV, z=ML)."""
+    P = np.atleast_2d(P)
+    return np.stack([P[:, 2], P[:, 0], P[:, 1]], axis=1)
+
+
+def _dense_bellies(muscles, per=140, thick=0.26, rng=None):
+    """A DENSE, volumetric fusiform belly per muscle (not a sparse line): fill the muscle's spindle -- points
+    along the origin->insertion axis, at a radius that swells in the middle (sin^0.6, the fusiform belly) and
+    tapers to the tendons, filling the perpendicular disk. `thick` = peak belly radius as a fraction of length.
+    Returns the belly cells (laid frame). This is the mass that pushes the skin out into the muscle silhouette."""
+    if rng is None:
+        rng = np.random.default_rng(0)
+    out = []
+    for m in muscles:
+        o = _to_laid(m.origin)[0]; i = _to_laid(m.insertion)[0]
+        seg = i - o; L = float(np.linalg.norm(seg)) + 1e-9
+        axis = seg / L
+        p1 = np.cross(axis, [0, 0, 1.0]); n1 = np.linalg.norm(p1)
+        p1 = p1 / n1 if n1 > 1e-6 else np.array([1.0, 0, 0])
+        p2 = np.cross(axis, p1)
+        n = max(24, int(per * L / 0.25))                             # more cells for a longer muscle
+        t = rng.random(n)
+        r_prof = thick * L * np.sin(np.pi * t) ** 0.6                 # fusiform: swollen middle, tendon taper
+        rr = r_prof * np.sqrt(rng.random(n)); th = 2 * np.pi * rng.random(n)
+        pts = (o[None] + (t * L)[:, None] * axis[None]
+               + (rr * np.cos(th))[:, None] * p1[None] + (rr * np.sin(th))[:, None] * p2[None])
+        out.append(pts)
+    return np.vstack(out) if out else np.zeros((0, 3))
+
+
+def _subcutaneous_fat(muscle, frac=0.06, n=6000, rng=None):
+    """A thin fat SHELL just outside the muscle mass: take the OUTER muscle cells (per AP slice x sector, the
+    envelope) and push them radially outward by `frac` of the body radius -> the panniculus adiposus that
+    rounds the muscle bellies into a smooth contour. Returns the fat points."""
+    if rng is None:
+        rng = np.random.default_rng(0)
+    S = shell(muscle, n_slice=60, n_sec=40, dens=2)                 # the muscle envelope
+    if not len(S):
+        return muscle[:0]
+    x = S[:, 0]
+    cy, cz = np.median(muscle[:, 1]), np.median(muscle[:, 2])       # body axis (DV, ML)
+    R = np.percentile(np.hypot(muscle[:, 1] - cy, muscle[:, 2] - cz), 95) + 1e-9
+    d = np.hypot(S[:, 1] - cy, S[:, 2] - cz) + 1e-9
+    push = 1.0 + frac * R / d                                       # push each envelope point radially out
+    F = S.copy()
+    F[:, 1] = cy + (S[:, 1] - cy) * push
+    F[:, 2] = cz + (S[:, 2] - cz) * push
+    if len(F) > n:
+        F = F[rng.choice(len(F), n, replace=False)]
+    return F + rng.normal(size=F.shape) * 0.004
+
+
+def build(species="human_male"):
+    g = reference_genome(species)
+    bones = build_skeleton(g)
+    muscles = build_muscles(g, bones)
+    muscle = _dense_bellies(muscles)                               # DENSE volumetric fusiform bellies
+    fat = _subcutaneous_fat(muscle)
+    layer = np.vstack([muscle, fat])                               # the flesh = muscle bellies + subcutaneous fat
+    return dict(muscle=muscle, fat=fat, layer=layer, n_muscles=len(muscles))
+
+
+def _silhouette(P, axis, n=90, plo=4, phi=96, smooth=3):
+    """Per-AP-band low/high extent along `axis` (2=ML front, 1=DV side): a filled body outline in which the
+    muscle bellies read as the widening of the contour. Smoothed along AP for a clean skin line."""
+    from scipy.ndimage import uniform_filter1d
+    x = P[:, 0]
+    edges = np.linspace(x.min(), x.max(), n + 1)
+    xs, lo, hi = [], [], []
+    for a, b in zip(edges[:-1], edges[1:]):
+        m = (x >= a) & (x < b)
+        if m.sum() < 6:
+            continue
+        xs.append(0.5 * (a + b)); lo.append(np.percentile(P[m, axis], plo)); hi.append(np.percentile(P[m, axis], phi))
+    xs, lo, hi = np.array(xs), np.array(lo), np.array(hi)
+    if smooth > 1 and len(xs) > smooth:
+        lo = uniform_filter1d(lo, smooth); hi = uniform_filter1d(hi, smooth)
+    return xs, lo, hi
+
+
+def flesh_skin(body, F, push=0.06, layers=3, rng=None):
+    """The MODEL-NATIVE flesh: given a model body cloud (laid frame x=AP,y=DV,z=ML) and its fates, drape the skin
+    over the MUSCLE+FAT rather than the bone. The model's own Muscle-fate cells are thickened into SUPERFICIAL
+    bellies (pushed radially toward the surface + jittered into mass) and a subcutaneous fat shell is added over
+    them, then the model skin mesh envelopes the fleshed body -- so where the muscle is thick the skin bulges.
+    Returns (skin_verts, skin_faces). Falls back to the plain body skin if there is no muscle."""
+    from medic.unified_embryo import FIDX
+    from medic.skin_shell_head import mesh as _model_skin
+    if rng is None:
+        rng = np.random.default_rng(0)
+    mus_ids = [FIDX[n] for n in ("Muscle",) if n in FIDX]
+    add = []
+    if mus_ids:
+        mus = body[np.isin(F, mus_ids)]
+        if len(mus) > 20:
+            cy, cz = float(np.median(body[:, 1])), float(np.median(body[:, 2]))
+            d = np.hypot(mus[:, 1] - cy, mus[:, 2] - cz) + 1e-9
+            R = np.percentile(np.hypot(body[:, 1] - cy, body[:, 2] - cz), 90) + 1e-9
+            fac = 1.0 + push * R / d                                  # push muscle toward the surface (belly bulge)
+            b = mus.copy(); b[:, 1] = cy + (mus[:, 1] - cy) * fac; b[:, 2] = cz + (mus[:, 2] - cz) * fac
+            span = float(np.ptp(body)) + 1e-9
+            for _ in range(layers):
+                add.append(b + rng.normal(size=b.shape) * 0.012 * span)   # thicken into a belly of mass
+    layer = np.vstack([body] + add) if add else body
+    fat = _subcutaneous_fat(layer, frac=0.04, n=max(2000, len(layer) // 6), rng=rng)
+    # anterior (ventral) sign so the FEET point FORWARD (the way the FACE looks). The EYES are the definitive
+    # anterior marker -- they sit on the front of the head -- and are more reliable than the near-midline spine in
+    # this DV-flat body. anterior = the DV direction from the brain toward the eyes.
+    ventral = None
+    eye_ids = [FIDX[n] for n in ("Eye", "Retina") if n in FIDX]
+    brain_ids = [FIDX[n] for n in ("Forebrain", "Midbrain", "Hindbrain") if n in FIDX]
+    if eye_ids and brain_ids and np.isin(F, eye_ids).sum() > 8 and np.isin(F, brain_ids).sum() > 8:
+        ventral = 1.0 if np.median(body[np.isin(F, eye_ids), 1]) >= np.median(body[np.isin(F, brain_ids), 1]) else -1.0
+    else:
+        for nm in ("Notochord", "Spinal Cord"):                # fallback: opposite the dorsal axis
+            if nm in FIDX and (F == FIDX[nm]).sum() > 20:
+                ventral = -1.0 if np.median(body[F == FIDX[nm], 1]) >= np.median(body[:, 1]) else 1.0
+                break
+    return _model_skin(np.vstack([layer, fat]), ventral=ventral)
+
+
+def _figure(R):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    muscle, layer = R["muscle"], R["layer"]
+    fig, ax = plt.subplots(1, 3, figsize=(12, 9), facecolor="#0d1017")
+    for a in ax:
+        a.set_facecolor("#0d1017"); a.set_aspect("equal"); a.axis("off")
+    ax[0].scatter(muscle[:, 2], muscle[:, 0], s=2, c="#b0403a", alpha=0.5)
+    ax[0].set_title(f"muscle bellies ({R['n_muscles']} muscles)", color="#cbd5e1", fontsize=9)
+    xs, lo, hi = _silhouette(layer, axis=2)                          # front (ML): muscle bulges widen the outline
+    ax[1].fill_betweenx(xs, lo, hi, color="#d8b49a")
+    ax[1].scatter(muscle[:, 2], muscle[:, 0], s=1, c="#a83c36", alpha=0.18)   # muscle showing through, faint
+    ax[1].set_title("skin over the flesh — front", color="#e8c9a8", fontsize=9)
+    xs2, lo2, hi2 = _silhouette(layer, axis=1)                       # side (DV)
+    ax[2].fill_betweenx(xs2, lo2, hi2, color="#d8b49a")
+    ax[2].set_title("skin — side", color="#e8c9a8", fontsize=9)
+    fig.suptitle("The flesh: skin draped over the MUSCLE+FAT layer (not the bone) — the muscle silhouette reads "
+                 "through the skin (deltoid, biceps, six-pack, gluteus, calf)", color="#e2e8f0", fontsize=9)
+    fig.tight_layout()
+    os.makedirs("data/organ_cascade", exist_ok=True)
+    fig.savefig("data/organ_cascade/flesh_surface_head.png", dpi=130, facecolor="#0d1017", bbox_inches="tight")
+    print("saved data/organ_cascade/flesh_surface_head.png")
+
+
+def main():
+    R = build()
+    print(f"flesh: {R['n_muscles']} muscles -> {len(R['muscle'])} belly cells + {len(R['fat'])} fat cells "
+          f"-> skin silhouette over the flesh layer ({len(R['layer'])} cells)")
+    _figure(R)
+
+
+if __name__ == "__main__":
+    main()

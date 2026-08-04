@@ -29,7 +29,7 @@ keywords:
   - developmental clock
   - low-rank adaptation
 license: MIT
-version: "1.5"
+version: "1.6"
 date-released: 2026-07-12
 references:
   - type: article
@@ -86,3 +86,12 @@ references:
     doi: 10.5281/zenodo.21322049
     year: 2026
     notes: "Differentiation-clock and organ-formation companion paper (Paper #8); its code is included in this repository."
+  - type: article
+    title: "Cognitive Biology: The Human Model and the GWAS Scaffold"
+    authors:
+      - family-names: Jacobs
+        given-names: "Miles B."
+        affiliation: "genetec.io, Cape Town, South Africa"
+    doi: 10.5281/zenodo.21796907
+    year: 2026
+    notes: "Human companion paper (Paper #7); its code is included in this repository."

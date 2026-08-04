@@ -62,9 +62,18 @@ FATE_PRC2 = {
     "Margin": 0.78, "Presumptive Mesoderm, Presumptive Ectoderm": 0.78,
     "Mesoderm": 0.66, "Somite": 0.66,                                  # mesoderm
     "Neural Keel": 0.58, "Neural Rod": 0.52, "Otic Vesicle": 0.52,     # early neural / placode
-    "Nervous System": 0.42, "Forebrain": 0.42, "Eye": 0.30,            # anterior neural (Hox-OFF)
+    # NEURAL TUBE COMMITS EARLY. Neural induction (BMP inhibition -> neural plate) happens at gastrulation,
+    # concurrent with mesoderm, and the plate rolls into the tube BEFORE convergent extension. The old
+    # values (Nervous System 0.42, Spinal Cord 0.30 = "last") conflated late Hox IDENTITY with late tube
+    # FORMATION: they left the dorsal-midline cells uncommitted while CE dispersed them, so the spinal cord
+    # never cohered (0.2% vs HESTA's 20%). The neural tube must claim its dorsal-midline column just before
+    # the somite/mesoderm (0.66) does, then refine Hox identity within it -- so the whole tube unlocks at 0.68.
+    "Nervous System": 0.68, "Forebrain": 0.68, "Eye": 0.30,            # neural tube (dorsal midline)
+    # brain SUBHEADS along the AP neural tube (2026-07-18): masters Otx2 (fore/mid), En1 (mid/hind
+    # boundary), Gbx2 (hindbrain); they share the early neural-tube unlock (regionalised within the tube).
+    "Midbrain": 0.68, "Hindbrain": 0.68, "Cerebellum": 0.66,
     "Neural Crest": 0.42,
-    "Spinal Cord": 0.30,                                               # posterior neural (Hox-ON), last
+    "Spinal Cord": 0.68,                                               # posterior neural tube (Hox refines later)
 }
 ANTERIOR_NEURAL = {"Forebrain", "Eye", "Nervous System"}
 POSTERIOR_NEURAL = {"Spinal Cord"}

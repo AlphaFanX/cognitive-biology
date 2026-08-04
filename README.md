@@ -15,7 +15,7 @@ framework described in the paper. It is **not** the full working tree — only
 the modules that implement the mechanisms and generate the results discussed in
 the manuscript, with no API keys, credentials, or large private data.
 
-It also contains the code for seven companion papers: the design paper,
+It also contains the code for eight companion papers: the design paper,
 *Cognitive Biology: Perceptrons and Morphogen Primordia* (see
 [Perceptrons and morphogen primordia](#perceptrons-and-morphogen-primordia-companion-paper));
 the cross-phylum paper, *Cognitive Biology Across Phyla: One Bioelectric
@@ -31,8 +31,10 @@ the embryo-computation paper, *Cognitive Biology: Computing the Embryo* (see
 differentiation-clock paper, *Cognitive Biology: Differentiation Clocks, Organ
 Formation and the MLP* (see
 [Differentiation clocks, organ formation and the MLP](#differentiation-clocks-organ-formation-and-the-mlp-companion-paper));
-and the human paper, *Cognitive Biology: The Human Model and the GWAS Scaffold*
-(see [The human model and the GWAS scaffold](#the-human-model-and-the-gwas-scaffold-companion-paper)).
+the human paper, *Cognitive Biology: The Human Model and the GWAS Scaffold*
+(see [The human model and the GWAS scaffold](#the-human-model-and-the-gwas-scaffold-companion-paper));
+and the mouse paper, *Cognitive Biology: The Mouse Model and the Attention-Head
+Manifold* (see [The mouse model and the attention-head manifold](#the-mouse-model-and-the-attention-head-manifold-companion-paper)).
 
 ## The idea in one paragraph
 
@@ -279,6 +281,37 @@ kernel and an individual adapter.
 | `medic/organ_modes_physiome.py`, `physiome_conductances.py`, `multi_organ_betse.py` | The Physiome/BETSE function atlas weighting each organ's eigenframe |
 | `face_demo/face_reconstruction.py`, `mesh_morph.py`, `gwas_adapter.py`, `make_figures.py` | Genome→face on the FaceBase mesh (directions from sequence, magnitudes from GWAS) |
 
+## The mouse model and the attention-head manifold (companion paper)
+
+These modules implement the mouse companion paper:
+
+> **Cognitive Biology: The Mouse Model and the Attention-Head Manifold**
+> Miles B. Jacobs (genetec.io, Cape Town, South Africa)
+> Zenodo, 2026. DOI: [10.5281/zenodo.21791849](https://doi.org/10.5281/zenodo.21791849)
+> Manuscript PDF: [`paper/cognitive_biology_9_anatomy.pdf`](paper/cognitive_biology_9_anatomy.pdf)
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21791849.svg)](https://doi.org/10.5281/zenodo.21791849)
+
+The compiler taken to the real mouse embryo and built out against the
+whole-embryo Stereo-seq atlas (MOSTA, E9.5–E13.5), run as a single forward/
+reverse loop. Grown from one cell it produces a recognisable vertebrate whose
+shape is its own; the shape head then folds the trunk and forms the organs
+(heart loop, gut coil, limb outgrowth), scored against a dense 3-D E16.5
+reconstruction. The heads prove to be a coupled system emitted on a low-rank
+(~7-D) manifold, so a species is a coordinated move and an individual variant a
+pleiotropy — the manifold a knockout panel reads out in loss of function.
+
+| Module | Role |
+|--------|------|
+| `medic/unified_embryo.py` | The four-head NCA+LGM grown from a single cell into a recognisable vertebrate |
+| `medic/limb_genome_frame.py` | Limbs on the antinodes of the left–right electric-body eigenmode; width → the fish-to-tetrapod (amphibian) threshold |
+| `medic/limb_shape.py` | Proximo-distal limb outgrowth (stylopod/zeugopod/autopod) |
+| `medic/heart_luminal.py` | The heart as a thin-walled luminal tube; recovers the loop's tortuosity (0.88 vs 0.52 cloud) |
+| `medic/e165_match_score.py`, `embryo_match_score.py`, `forward_organs_solid.py` | Scoring the forward organs against the dense 3-D E16.5 reconstruction vs a shapeless-cloud null |
+| `medic/basic_vertebrate_movie.py`, `basic_vertebrate_browser.py` | The grow-from-one-cell movie and the interactive viewer (fish→tetrapod width slider) |
+| `menagerie/genome.py`, `decoder.py`, `grow_from_kernel.py`, `grow_nca.py` | The menagerie: low-rank genome knobs decoded into distinct animals from one kernel |
+| `menagerie/grow_limbed.py`, `viewer_limbed.py` | The menagerie limb-emergence figure and viewer |
+
 ## Install
 
 ```bash
@@ -336,6 +369,9 @@ See [`CITATION.cff`](CITATION.cff).
 
 > Jacobs, M. B. (2026). *Cognitive Biology: The Human Model and the GWAS
 > Scaffold.* Zenodo. https://doi.org/10.5281/zenodo.21796907
+
+> Jacobs, M. B. (2026). *Cognitive Biology: The Mouse Model and the
+> Attention-Head Manifold.* Zenodo. https://doi.org/10.5281/zenodo.21791849
 
 ## License
 

@@ -1021,14 +1021,32 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
     return Q
 
 
+def _ventral_sign(Q, fate):
+    """The body's own anterior (ventral) DV sign, read off the cloud: the EYES sit on the front of the
+    head, so anterior = the DV direction from the brain toward the eyes (same rule flesh_skin uses).
+    Fallback: opposite the dorsal Notochord/Spinal Cord. Returns +1.0 or -1.0 on the laid-frame y axis."""
+    from medic.unified_embryo import FIDX
+    F = np.asarray(fate)
+    eye_ids = [FIDX[n] for n in ("Eye", "Retina") if n in FIDX]
+    brain_ids = [FIDX[n] for n in ("Forebrain", "Midbrain", "Hindbrain") if n in FIDX]
+    if eye_ids and brain_ids and np.isin(F, eye_ids).sum() > 8 and np.isin(F, brain_ids).sum() > 8:
+        return 1.0 if np.median(Q[np.isin(F, eye_ids), 1]) >= np.median(Q[np.isin(F, brain_ids), 1]) else -1.0
+    for nm in ("Notochord", "Spinal Cord"):
+        if nm in FIDX and (F == FIDX[nm]).sum() > 20:
+            return -1.0 if np.median(Q[F == FIDX[nm], 1]) >= np.median(Q[:, 1]) else 1.0
+    return 1.0
+
+
 def feet_mesh(Q, fate, frac=1.0):
-    """Genome-plausible pentadactyl autopod at each leg's distal tip (the Hox13 autopod territory).
-    The big toe is MEDIAL by the limb's own L/R axis (hallux toward the midline on BOTH feet), via the
-    chirality flip in hand_foot_skin. Digit COUNT is the pentadactyl default of the limb head (set by
+    """Genome-plausible pentadactyl autopod at each leg's distal tip (the Hox13 autopod territory) --
+    the ONE pair of feet on the body (flesh_skin builds its skin shell with feet=False). Toes point
+    VENTRAL by the body's own eye-derived anterior sign, and the big toe is MEDIAL on BOTH feet via the
+    chirality flip in hand_foot_skin (the fan's spread axis is cross(out, up), so the side needing the
+    mirror depends on the ventral sign). Digit COUNT is the pentadactyl default of the limb head (set by
     the Turing / lateral-inhibition wavelength elsewhere in the framework); full per-digit morphogenesis
     is future work -- this is a schematic autopod that does not violate the genome, NOT a MakeHuman graft.
     The thin, stumpy realisation is the kinematics-without-physics limitation (no soft-tissue settling).
-    Laid frame (x=AP head+, +y ventral, z=ML). Returns (verts, faces) with FIXED counts (2 * HFS.NV) so
+    Laid frame (x=AP head+, y=DV, z=ML). Returns (verts, faces) with FIXED counts (2 * HFS.NV) so
     the movie can emit the skin faces once. `frac` in [0,1] ramps the autopod out with maturation."""
     from medic import hand_foot_skin as HFS
     x, z = Q[:, 0], Q[:, 2]
@@ -1037,6 +1055,7 @@ def feet_mesh(Q, fate, frac=1.0):
     leg = (np.asarray(fate) == LIMB) & (apf < 0.5)
     span = 0.055 * H
     length = 0.14 * H * float(np.clip(0.15 + 0.85 * frac, 0.15, 1.0))   # autopod emerges late (Hox13)
+    dvsign = _ventral_sign(Q, fate)                          # toes FORWARD: anterior from the body's own eyes
     V, Fc, off = [], [], 0
     for sgn in (-1.0, 1.0):                                  # left (z<0), right (z>0)
         m = leg & (np.sign(z) == sgn)
@@ -1045,7 +1064,8 @@ def feet_mesh(Q, fate, frac=1.0):
             tip = legc[legc[:, 0] < np.percentile(legc[:, 0], 15)].mean(0)   # distal ankle
         else:
             tip = np.array([x.min(), 0.0, sgn * 0.10 * H])   # fallback: bud tip on this side
-        v, f = HFS.build(tip, [0, 1.0, 0], [-1.0, 0, 0], span, length, "foot", flip=(tip[2] < 0))
+        v, f = HFS.build(tip, [0, dvsign, 0], [-1.0, 0, 0], span, length, "foot",
+                         flip=(tip[2] * dvsign < 0))         # hallux medial on BOTH feet
         V.append(v); Fc.append(f + off); off += len(v)
     return np.vstack(V).astype(np.float32), np.vstack(Fc).astype(np.int32)
 

@@ -184,7 +184,7 @@ def _tube(P, n_slice=48, n_sec=24, close_ends=True):
     return verts.astype(np.float32), np.array(faces, dtype=np.int32)
 
 
-def mesh(P, n_slice=48, n_sec=24, crotch_f=0.42, ventral=None):
+def mesh(P, n_slice=48, n_sec=24, crotch_f=0.42, ventral=None, feet=True):
     """MULTI-TUBE skin surface: a torso+head tube, a sleeve per ARM, and a tube per LEG, unioned. The ARM sleeves
     are essential in the Vitruvian arms-OUT pose: the torso tube's median-filter erases a horizontal arm as a
     T-pose splay spike, so without a dedicated sleeve the arms (and the hands + fingers at their ends) render
@@ -254,14 +254,16 @@ def mesh(P, n_slice=48, n_sec=24, crotch_f=0.42, ventral=None):
     # anterior (toes point FORWARD): use the ventral sign from the fated cloud if given, else estimate from DV skew.
     dvsign = float(ventral) if ventral is not None else (1.0 if torso[:, 1].mean() >= P[:, 1].mean() else -1.0)
     H = float(np.ptp(x)) + 1e-9                                 # stature: size the feet off the body, not the thin leg
-    for leg in (legR, legL):                                   # feet: toes point anterior, sole down, at the SOLE
-        if len(leg) >= 8:
-            lo = leg[leg[:, 0] < np.percentile(leg[:, 0], 12)]  # the lowest slice of the leg
+    for leg in ((legR, legL) if feet else ()):                 # feet: toes point anterior, sole down, at the SOLE
+        if len(leg) >= 8:                                      # (feet=False when the caller supplies its own feet,
+            lo = leg[leg[:, 0] < np.percentile(leg[:, 0], 12)]  # e.g. human_movie.feet_mesh -- avoids a double pair)
             tip = np.array([leg[:, 0].min(), lo[:, 1].mean(), lo[:, 2].mean()])  # ANCHOR at the true leg bottom
         else:
             tip = np.array([x.min(), torso[:, 1].mean(), 0.0])
+        # big toe MEDIAL on both feet: the fan's spread axis is cross(out, up), so it reverses with the ventral
+        # sign -- which side needs the mirror depends on dvsign, not on ML alone.
         appendages.append(HFS.build(tip, [0, dvsign, 0], [-1, 0, 0], 0.055 * H, 0.14 * H, "foot",
-                                    flip=(tip[2] < 0)))   # big toe MEDIAL on both feet
+                                    flip=(tip[2] * dvsign < 0)))
     for v, f in appendages:
         V.append(v); Fc.append(f + off); off += len(v)
     Vout = np.vstack(V).astype(np.float32)

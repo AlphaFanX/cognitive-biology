@@ -174,7 +174,9 @@ def flesh_skin(body, F, push=0.06, layers=3, rng=None, with_bellies=True):
             if nm in FIDX and (F == FIDX[nm]).sum() > 20:
                 ventral = -1.0 if np.median(body[F == FIDX[nm], 1]) >= np.median(body[:, 1]) else 1.0
                 break
-    return _model_skin(np.vstack([layer, fat]), ventral=ventral)
+    # feet=False: the movie supplies its own genome-plausible autopods (human_movie.feet_mesh); building the
+    # skin shell's schematic feet too gave the body FOUR feet.
+    return _model_skin(np.vstack([layer, fat]), ventral=ventral, feet=False)
 
 
 def _figure(R):

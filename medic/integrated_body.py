@@ -52,6 +52,105 @@ from medic import fascia_head as FAS
 from medic import skin_shell_head as SKN
 
 
+_MUS_TGT = None
+# cells per muscle belly. Raised 40 -> 200 (stage-2): now that each muscle has a distinct architecture, 40 was
+# too coarse to resolve a fan/strap/sheet (and below the ~100-200 D2 convergence). Muscle bellies live in their
+# own dicts (head_muscle / named_muscles), NOT the base cloud, so this does not bloat the 224k-cell body.
+MUSCLE_N = 200
+
+
+def _muscle_targets():
+    """Per-muscle canonical shape targets (medic.muscle_shape_targets) -> {muscle: {type,E,cross_flat,peak_pos}}."""
+    global _MUS_TGT
+    if _MUS_TGT is None:
+        import json
+        p = "data/canonical_muscle_targets.json"
+        _MUS_TGT = json.load(open(p)) if os.path.exists(p) else {}
+    return _MUS_TGT
+
+
+def _muscle_shape(nm):
+    """Look up a muscle's target architecture; fall back to the old generic fusiform if none."""
+    t = _muscle_targets().get(nm.replace(" ", "_"))
+    if not t:
+        return dict(E=5.0, cross_flat=1.0, ptype="fusiform", peak=0.5)
+    return dict(E=float(np.clip(t.get("E", 5.0), 1.2, 9.0)),
+                cross_flat=float(np.clip(t.get("cross_flat", 1.0), 0.25, 1.0)),
+                ptype=t.get("type", "fusiform"), peak=float(t.get("peak_pos", 0.5)))
+
+
+def _belly(o, i, n, rng, E=5.0, cross_flat=1.0, ptype="fusiform", peak=0.5):
+    """A muscle belly spanning origin o -> insertion i, shaped to a per-muscle ARCHITECTURE (not one generic
+    fusiform needle): width = length/E (aspect), cross-section flattened by cross_flat (sheets), and a taper
+    PROFILE by type -- fusiform (mid bulge) / strap (near-constant) / fan (broad at origin) / bulky (short round)
+    / sheet (broad flat slab)."""
+    o = np.asarray(o, float); i = np.asarray(i, float)
+    ax = i - o; L = np.linalg.norm(ax) + 1e-9; u = ax / L
+    ref = np.array([0.0, 1.0, 0.0]) if abs(u[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    e1 = np.cross(u, ref); e1 /= np.linalg.norm(e1) + 1e-9; e2 = np.cross(u, e1)
+    rbase = 0.5 * L / max(E, 0.6)                                 # half-width from the target aspect
+    t = rng.random(n); x = 2 * t - 1
+    if ptype == "strap":
+        prof = 0.80 + 0.20 * np.sqrt(np.clip(1 - x ** 2, 0, 1))   # near-constant width
+    elif ptype == "fan":
+        prof = 0.20 + 0.80 * (1.0 - t)                            # triangular: broad at origin -> narrow insertion
+    elif ptype == "bulky":
+        prof = np.clip(1 - x ** 2, 0, 1) ** 0.4                   # short, round, full belly
+    elif ptype == "sheet":
+        prof = 0.75 + 0.25 * np.sqrt(np.clip(1 - x ** 2, 0, 1))   # broad flat slab (flattened by cross_flat)
+    else:
+        prof = np.sqrt(np.clip(1 - x ** 2, 0, 1))                 # fusiform (fat middle, tapered ends)
+    rad = rbase * prof * np.sqrt(rng.random(n))
+    th = rng.random(n) * 2 * np.pi
+    r1 = rad * np.cos(th); r2 = rad * np.sin(th) * cross_flat     # flatten the 3rd axis for sheets
+    return o + t[:, None] * ax + r1[:, None] * e1 + r2[:, None] * e2
+
+
+def _masticatory(skull, rng):
+    """MASTICATORY muscles: masseter / temporalis / pterygoid bellies cranium -> mandible (the head had no
+    muscle mass, so the Gray's scorecard found the jaw muscles starved to n<20). Bilateral."""
+    mand = skull.get("mandible", {}).get("P") if isinstance(skull.get("mandible"), dict) else None
+    cran = None
+    for k in ("frontal", "occipital", "nasal", "maxilla"):
+        p = skull.get(k, {}).get("P") if isinstance(skull.get(k), dict) else None
+        if p is not None and len(p) >= 10:
+            cran = p; break
+    if mand is None or cran is None or len(mand) < 5:
+        return {}
+    mc, cc = mand.mean(0), cran.mean(0); mw = np.ptp(mand[:, 2]) + 1e-3; ax = np.ptp(cran[:, 0]) + 1e-3
+    out = {}
+    for nm, apo in (("masseter", 0.0), ("temporalis", 0.18), ("pterygoid", -0.10)):
+        for side, sgn in (("R", 1.0), ("L", -1.0)):
+            o = cc + np.array([apo * ax, 0.0, sgn * 0.30 * mw])
+            i = mc + np.array([0.0, 0.0, sgn * 0.30 * mw])
+            out[f"{nm}-{side}"] = dict(part=nm, side=side, O=o, I=i,
+                                       P=_belly(o, i, MUSCLE_N, rng, **_muscle_shape(f"{nm}-{side}")))
+    return out
+
+
+def _named_muscle_bellies(base, F, rng):
+    """Every named muscle as an explicit FUSIFORM BELLY between its skeletal origin and insertion (the
+    action-line carve gives O/I in the model frame). Replaces the shared-CT-scaffold carve, which starved
+    most muscles -- each muscle is now its own belly spanning its two attachments (Gray's), which is what a
+    muscle IS. Jaw muscles are handled separately (head_muscle)."""
+    from medic.limb_muscle_head import carve_by_action_line
+    jaw = ("masseter", "temporalis", "pterygoid")
+    try:
+        mus, assign, muscles, O, I = carve_by_action_line(base, F)
+    except Exception:
+        return {}
+    out = {}
+    for m in range(len(muscles)):
+        nm = muscles[m].name
+        if any(j in nm for j in jaw):
+            continue
+        L = float(np.linalg.norm(I[m] - O[m]))
+        if L < 1e-6:
+            continue
+        out[nm] = dict(part=nm, O=O[m], I=I[m], P=_belly(O[m], I[m], MUSCLE_N, rng, **_muscle_shape(nm)))
+    return out
+
+
 def assemble():
     base, F = build_base()                         # ONE high-fidelity cloud, shared by every head
     rng = np.random.default_rng(0)
@@ -79,6 +178,8 @@ def assemble():
     # TEETH head: lateral-inhibition-spaced arcades on the maxilla (upper) + mandible (lower) = the DV split.
     # Reuses the already-carved skull so the skull head is not re-run. 32 teeth, incisor->molar graded.
     R["teeth"] = TE.build(base, F, skull=R["skull"]).get("arches", {})
+    R["head_muscle"] = _masticatory(R["skull"], rng)       # masseter/temporalis/pterygoid (jaw muscle mass)
+    R["named_muscles"] = _named_muscle_bellies(base, F, rng)  # every muscle = an explicit belly O->I
     # FLESH: adipose (PPARG fat -- subcutaneous contour + visceral) + fascia (COL1A1/SCX -- deep fascia + ligaments)
     R["adipose"] = ADI.build(base, F)
     R["fascia"] = FAS.build(base, F)
@@ -98,15 +199,15 @@ def assemble():
             continue
         knee = 0.5 * (fem.mean(0) + tib.mean(0))
         knee = knee + np.array([0.0, dsn * 0.03 * Hb, 0.0])         # nudge to the ventral (extensor) face of the knee
-        pat = knee + rng.normal(size=(14, 3)) * 0.012
+        pat = knee + rng.normal(size=(28, 3)) * 0.012          # sesamoid disc (>=20 cells, non-degenerate)
         R["patella"][f"patella-{side}"] = dict(kind="bone", part="patella", bone="patella", side=side, P=pat)
     R["hyoid"] = {}
     mand = R["skull"].get("mandible")
     if mand is not None:
         mc = mand["P"].mean(0) + np.array([-0.05 * Hb, dsn * 0.02 * Hb, 0.0])   # inferior + ventral to the jaw
-        t = np.linspace(-1, 1, 16)                                  # a small U (the hyoid body + greater cornua)
-        u = np.c_[mc[0] + 0.015 * Hb * t ** 2, np.full(16, mc[1]), 0.03 * Hb * t]
-        R["hyoid"]["hyoid"] = dict(kind="bone", part="hyoid", bone="hyoid", side="M", P=u + rng.normal(size=(16, 3)) * 0.004)
+        t = np.linspace(-1, 1, 26)                                  # a small U (the hyoid body + greater cornua)
+        u = np.c_[mc[0] + 0.015 * Hb * t ** 2, np.full(26, mc[1]), 0.03 * Hb * t]
+        R["hyoid"]["hyoid"] = dict(kind="bone", part="hyoid", bone="hyoid", side="M", P=u + rng.normal(size=(26, 3)) * 0.004)
 
     # MUSCLE
     R["axial_muscle"] = CT.carve(base, F)

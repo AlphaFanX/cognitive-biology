@@ -66,6 +66,21 @@ def _forelimbs(base, F):
     return out
 
 
+def _socket_cup(center, facing, radius, n, rng):
+    """A concave articular SOCKET (glenoid fossa / acetabulum): a shallow spherical-cap bowl opening toward
+    `facing` (the ball articulates on the +facing side). Rim forward, centre pushed back -> genuinely concave,
+    not a landmark point. Fixes the n=1 socket the Gray's scorecard flagged."""
+    f = np.asarray(facing, float); f = f / (np.linalg.norm(f) + 1e-9)
+    ref = np.array([0.0, 0.0, 1.0]) if abs(f[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    u = np.cross(f, ref); u /= np.linalg.norm(u) + 1e-9; v = np.cross(f, u)
+    pts = []
+    for _ in range(n):
+        rr = radius * np.sqrt(rng.random()); th = rng.random() * 2 * np.pi
+        depth = 0.45 * radius * (1 - (rr / (radius + 1e-9)) ** 2)     # deepest at the centre = concave
+        pts.append(center + u * rr * np.cos(th) + v * rr * np.sin(th) - f * depth)
+    return np.array(pts)
+
+
 def _arc(p0, p1, bow, n):
     """A gentle arc of n points from p0 to p1, bowed by `bow` (in world units) along +DV (the clavicle /
     scapular spine curve, not a straight rod)."""
@@ -127,7 +142,9 @@ def build(base, F, span=None, per=90):
         parts[f"scapula-{side}"] = dict(kind="bone", part="scapula", side=side, P=blade)
         # Gray's: the glenoid is a FOSSA OF THE SCAPULA, not a separate bone -> label it as scapula, tagged as
         # the glenoid landmark (the pectoral girdle bones are just clavicle + scapula).
-        parts[f"glenoid-{side}"] = dict(kind="bone", part="scapula", landmark="glenoid", side=side, P=glenoid[None])
+        cup = _socket_cup(glenoid, armdir, 0.12 * span * H, 36, rng)     # a real concave socket, not a point
+        parts[f"glenoid-{side}"] = dict(kind="bone", part="scapula", landmark="glenoid", side=side,
+                                        P=np.vstack([glenoid[None], cup]))
         parts[f"deltoid-{side}"] = dict(kind="muscle", part="deltoid", side=side, P=delt)
     return dict(parts=parts, H=H, span=span, glenoids={s: p["P"][0] for s, p in
                 {f"glenoid-{k}": parts[f"glenoid-{k}"] for k in fl}.items()})

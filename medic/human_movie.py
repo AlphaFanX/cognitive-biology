@@ -584,6 +584,16 @@ def mature_cloud(Q, fate, f, params=None, register=True):
     if hm.sum() >= 8 and p.get("head_dv", 0.0) and f > 0:
         hcy = float(np.median(Q[hm, 1]))
         Q[hm, 1] = hcy + (Q[hm, 1] - hcy) * (1.0 + p["head_dv"] * f)
+    # HEAD ROUNDING (kill the "xenomorph"): the cranium must be a rounded ovoid, not an elongated ridge. Conform the
+    # head cloud's three axis extents toward the human head aspect AP:DV:ML ~ 1.42:1.32:1.0 (height ~0.135 H, depth
+    # ~0.125, breadth ~0.095) about its centroid -- shrinking whichever axis is over-long -> a braincase, not a snout.
+    if hm.sum() >= 30 and f > 0:
+        hc = Q[hm].mean(0)
+        ext = np.ptp(Q[hm], axis=0) + 1e-9                       # AP, DV, ML extents
+        aspect = np.array([1.42, 1.32, 1.0]); aspect = aspect / aspect.mean()
+        tgt_ext = aspect * float(ext.mean())
+        sc = np.clip(tgt_ext / ext, 0.6, 1.7)
+        Q[hm] = hc + (Q[hm] - hc) * (1.0 + f * (sc - 1.0))
     # ANTHROPOMETRIC DV ENVELOPE (regional): a man's dorsoventral depth VARIES along the body -- chest ~0.15 H,
     # but head / neck / limbs ~0.10 -- so the single trunk dv_girth knob leaves the deep cranial region humping
     # at the head-neck junction (the dorsal hump). Clamp each AP slice's DV depth to the anthropometric envelope,
@@ -609,6 +619,35 @@ def mature_cloud(Q, fate, f, params=None, register=True):
             s = 1.0 - f * (1.0 - cap / depth)
             idx = np.where(m)[0]
             Q[idx, 1] = axis_dv + (Q[idx, 1] - axis_dv) * s
+    # ANTHROPOMETRIC ML ENVELOPE (regional): the mediolateral BREADTH also varies -- broad shoulders (~0.245 H)
+    # and hips (~0.19), a pinched waist, but thin neck / head / limbs. ml_girth + the regional taper leave the
+    # legs / hips / head too broad (the stout, "not-quite-standing" look), so clamp each AP slice's ML breadth to
+    # the anthropometric envelope, compressing about the ML midline. Blended by f (f=0 identity). The ML twin of
+    # the DV envelope above -- together they drive the front silhouette to real breadth (posture_silhouette scorer).
+    mid_ml = float(np.median(Q[:, 2]))
+    _lb = FIDX.get("Limb Bud")
+    notlimb = (fate != _lb) if (fate is not None and _lb is not None) else np.ones(len(Q), bool)   # don't clamp the arms
+    for i in range(nb):
+        lo = xx.min() + i / nb * stature
+        m = (xx >= lo) & (xx < lo + stature / nb) & notlimb       # the arm (Limb Bud) extends past the trunk -- exempt it
+        if m.sum() < 8:
+            continue
+        breadth = (np.percentile(Q[m, 2], 95) - np.percentile(Q[m, 2], 5)) / stature
+        u = (i + 0.5) / nb                                                    # AP fraction (0 = feet, 1 = crown)
+        # anthropometric FULL ML breadth target (fraction of H): broad shoulders + chest + hips, pinched waist,
+        # thin neck/head/limbs. TWO-SIDED conform (build the narrow ribbon-trunk OUT to human breadth AND slim the
+        # wide hips/head) -- the ML twin of dv_girth building out the flat DV ribbon; anthropometric, not a fudge.
+        tgt = (0.070                                                          # thin baseline (limbs / ankle)
+               + 0.175 * np.exp(-((u - 0.80) / 0.040) ** 2)                   # shoulders ~0.245
+               + 0.120 * np.exp(-((u - 0.70) / 0.115) ** 2)                   # chest ~0.19 (wider tail fills the waist)
+               + 0.100 * np.exp(-((u - 0.47) / 0.140) ** 2)                   # hips ~0.19 (broader, less peaky)
+               + 0.045 * np.exp(-((u - 0.30) / 0.110) ** 2)                   # thighs ~0.13
+               + 0.028 * np.exp(-((u - 0.905) / 0.042) ** 2)                  # head ~0.10 (tighter -> crown tapers)
+               - 0.030 * np.exp(-((u - 0.855) / 0.022) ** 2))                 # NECK pinch (thin neck below the head)
+        if breadth > 1e-3:
+            s = float(np.clip(1.0 + f * (tgt / breadth - 1.0), 0.4, 2.3))
+            idx = np.where(m)[0]
+            Q[idx, 2] = mid_ml + (Q[idx, 2] - mid_ml) * s
     if register:
         Q = _visceral_ap_register(Q, fate, f)      # migrate each organ to its Hox-addressed axial level
         Q = _ventral_viscera_spread(Q, fate, f)     # spread the viscera off the dorsal wall to fill the coelom
@@ -809,6 +848,54 @@ def tuck_limbs(Q, reg_fate, amt):
     return Q
 
 
+ARM_REACH_FRAC = 0.44      # anatomical upper-limb length (acromion->fingertip) as a fraction of stature H
+                           # (Drillis: upper arm 0.186 + forearm 0.146 + hand 0.108). Caps the over-extended arm.
+ARM_RADIUS_FRAC = 0.052    # upper-arm RADIUS as a fraction of H (a limb, not a blade); tapers to the wrist.
+
+
+def _arm_tube(Q, m, r0, taper=0.45):
+    """Reshape one arm's cells into a SOLID TAPERING CYLINDER about its own principal (shoulder->hand) axis, so
+    the razor-thin lateral sheet (DV ~0.02 H) becomes a rounded limb the flesh can drape over. Keeps each cell's
+    along-arm position; sets its cross-section to fill a disk of radius r0 (shoulder) tapering to r0*(1-taper)
+    (wrist) via a deterministic golden-angle fill (no RNG). Read-only outside the arm."""
+    idx = np.where(m)[0]
+    pts = Q[idx]; c0 = pts.mean(0); X = pts - c0
+    try:
+        _, _, vt = np.linalg.svd(X, full_matrices=False)
+    except Exception:
+        return
+    axis, e1, e2 = vt[0], vt[1], vt[2]
+    along = X @ axis
+    a0, a1 = float(along.min()), float(along.max())
+    sf = (along - a0) / (a1 - a0 + 1e-9)                       # 0..1 along the axis
+    med = np.median(along)                                     # orient sf=0 at the SHOULDER (higher AP x = up)
+    if pts[along >= med, 0].mean() < pts[along < med, 0].mean():
+        sf = 1.0 - sf
+    rr = r0 * (1.0 - taper * sf)                               # taper shoulder -> wrist
+    n = len(idx)
+    theta = 2 * np.pi * ((np.arange(n) * 0.6180339887) % 1.0)  # golden-angle sunflower fill of the disk
+    rad = rr * np.sqrt(((np.arange(n) * 0.7548776662 + 0.5) % 1.0))
+    Q[idx] = c0 + along[:, None] * axis + (rad * np.cos(theta))[:, None] * e1 + (rad * np.sin(theta))[:, None] * e2
+
+
+def mature_for_display(P, fate, adult_len=3.2):
+    """Apply the movie's ADULT maturation (allometry + DV/ML anthropometric envelopes + head rounding + limb
+    pose/length-cap) to a labelled point cloud, so the tabs (Gray's / NCA+LLM) show the SAME proportioned
+    Vitruvian body the movie renders -- not the raw un-matured build_base cloud (the 'insect'). `fate` = per-cell
+    fate index (Limb Bud cells get grow_limbs; head fates get the head scaling)."""
+    P = np.asarray(P, float)
+    headf = [FIDX[n] for n in _HEAD_FATES if n in FIDX]
+    hm = np.isin(fate, headf)
+    if hm.any() and P[hm, 0].mean() < np.median(P[:, 0]):        # orient head to +x (viewer convention)
+        P = P.copy(); P[:, 0] = -P[:, 0]
+    Q = mature_cloud(P, fate, 1.0, MATURE_SEARCHED)
+    lb = FIDX.get("Limb Bud")
+    if lb is not None:
+        Q = grow_limbs(Q, fate == lb, _limb_grow_model(1.0, MATURE_SEARCHED["limb_ext"]),
+                       _limb_grow_model(1.0, MATURE_SEARCHED.get("leg_ext", MATURE_SEARCHED["limb_ext"])), pose=1.0)
+    return Q * (adult_len / _long_axis_len(Q))
+
+
 def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
     """Grow the limbs OUT from buds AND swing them down to a standing pose. `grow`/`leg_grow` set limb LENGTH
     (extension past the bud); `pose` in [0,1] sets the arms-down/legs-down ROTATION (0 = T-pose/splayed bud,
@@ -821,17 +908,29 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
     lg = grow if leg_grow is None else leg_grow               # legs extend on their OWN knob (leg_ext)
     if not limb.any():
         return Q
-    pose_a = 0.0                                               # arms OUT (the Vitruvian pose) -- extend laterally, don't hang
+    # POSE (2026-08-08, Miles chose arms-DOWN): the Vitruvian arms-OUT pose CANNOT be skinned without webbing a
+    # bat-wing membrane between the horizontal arm and the trunk (the "weirdo"). So the arms now swing DOWN to hang
+    # at the sides by the maturation stage (pose_a follows `pose`): 0 = splayed bud (early), 1 = hanging (adult).
+    # This removes the wings entirely. Legs still stand.
+    # A-POSE cap (2026-08-09): fully-down (pose_a=1) tucks the arms against the torso and the skin mesh ABSORBS
+    # them -> "no arms". Arms-out (0) webs bat-wings. pose_a~0.55 = an A-pose (arms down-and-out with a gap):
+    # distinct visible arms + minimal webbing (tested per-pose on the adult frame).
+    pose_a = 0.55 * float(np.clip(pose, 0.0, 1.0)) if pose is not None else float(np.clip(grow - 1.0, 0.0, 1.0))
     pose_l = float(np.clip(lg - 1.0, 0.0, 1.0)) if pose is None else float(np.clip(pose, 0.0, 1.0))
     if abs(grow - 1.0) < 1e-3 and abs(lg - 1.0) < 1e-3 and pose_a < 1e-3 and pose_l < 1e-3:
         return Q
     Q = Q.copy()
     x, z = Q[:, 0], Q[:, 2]
     apf = (x - x.min()) / (np.ptp(x) + 1e-9)
-    arm = limb & (apf >= 0.5)
+    Hh = np.ptp(x) + 1e-9
+    w = np.percentile(np.abs(z[~limb]), 70) if (~limb).any() else 0.12 * (np.ptp(z) + 1e-9)
+    # ARM = the limb-bud arm PLUS any cell splayed laterally beyond the shoulder girdle at shoulder height --
+    # the arm's muscle/skin/connective COVERING is NOT limb-fate, so if we swing only F==LIMB it stays splayed
+    # (the wide shoulder spike). lat_thr sits past the shoulder breadth (~0.12 H half) so the girdle is kept.
+    lat_thr = max(0.16 * Hh, 1.8 * w)
+    arm = (apf >= 0.5) & (limb | (np.abs(z) > lat_thr))
     leg = limb & (apf < 0.5)
-    body = ~limb
-    w = np.percentile(np.abs(z[body]), 70) if body.any() else 0.12 * (np.ptp(z) + 1e-9)
+    body = ~(arm | leg)
     # NECK: seat the shoulders BELOW the head. The arm bud sits too high (its top reaches up to the jaw), so there
     # is no cervical gap and the arms fan out at the mouth level (reads as a "wide mouth"). Drop the arm cells so
     # the shoulder is ~0.22 H below the crown, opening a neck between the head and the shoulders.
@@ -850,17 +949,26 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
         # VITRUVIAN STANDING: extend each arm LATERALLY (out to the side, along ML) from the shoulder by `grow`,
         # so the arms reach the canonical span (~0.44 H each), then swing DOWN by pose_a (0 = arms out = Vitruvian,
         # 1 = hanging at the side). Extending laterally (not only by rotation) is what gives the arms real length.
-        g = max(grow, 1.0)
+        Hh = np.ptp(x) + 1e-9
+        arm_len = ARM_REACH_FRAC * Hh                            # anatomical arm length (acromion -> fingertip, ~0.44 H)
         for sgn in (1.0, -1.0):
             m = arm & (np.sign(z) == sgn)
             if m.sum() < 4:
                 continue
             sh_x = np.percentile(x[m], 85)                       # shoulder = top (AP) of this arm
             sh_z = sgn * w                                       # shoulder sits at the trunk's side
-            out_z = sh_z + (z[m] - sh_z) * g                     # arms-OUT: extend laterally from the shoulder
-            reach = np.abs(out_z - sh_z)                         # along-arm reach (now the extended length)
-            Q[m, 0] = (1 - pose_a) * x[m] + pose_a * (sh_x - reach)          # swing down by pose_a
-            Q[m, 2] = (1 - pose_a) * out_z + pose_a * (sh_z * (1 - 0.15 * reach / (reach.max() + 1e-9)))
+            raw = np.abs(z[m] - sh_z)                            # each arm cell's lateral offset from the shoulder
+            # TARGET the length: scale so the HAND (outer cells) reaches arm_len, regardless of the bud's own size
+            # or limb_ext (the build_base arm bud is narrow, so a multiplier alone left the arm a stub) -> always ~0.44 H.
+            g_eff = arm_len / (np.percentile(raw, 75) + 1e-9)   # top ~25% of arm cells reach full length (a solid arm, not a stub)
+            reach = np.minimum(raw * g_eff, arm_len)             # along-arm reach, capped at the anatomical length
+            out_z = sh_z + sgn * reach                           # arms-OUT: extended to the anatomical length
+            # ROTATE the arm about the shoulder by pose_a*90deg (0 = lateral/out, 1 = straight down) -- this
+            # PRESERVES the arm LENGTH. (The old linear interp between the out+down endpoints cut the corner and
+            # shortened the arm to ~0.71x at the A-pose.) reach = per-cell along-arm distance from the shoulder.
+            theta = pose_a * (np.pi / 2.0)
+            Q[m, 0] = sh_x - reach * np.sin(theta)
+            Q[m, 2] = sh_z + sgn * reach * np.cos(theta)
     if arm.any():                                            # TRIM the faint outermost arm tail (runs after EITHER
         for sgn in (1.0, -1.0):                              # branch above), clamping the lateral reach to the solid arm
             m = arm & (np.sign(Q[:, 2]) == sgn)
@@ -868,11 +976,19 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
                 continue
             sh_z = sgn * w
             off = np.abs(Q[m, 2] - sh_z)
-            # define the arm EDGE by the BULK of the cells (88th pct), not a high percentile that the tail
-            # itself drags outward -- then hard-clamp everything to a hair past that edge. The old 94th-pct
-            # cap left a faint ~0.5% tail out to 0.77 H (solid arm reaches ~0.60 H); this kills it.
-            cap = 1.06 * np.percentile(off, 88)
+            # only trim a genuine OUTLIER tail (97th pct): the arm extension already caps cleanly at the anatomical
+            # length, so the old 88th-pct cap was chopping the real arm back to a stub (~0.25 H) -- keep the full arm.
+            cap = 1.02 * np.percentile(off, 97)
             Q[m, 2] = sh_z + np.sign(Q[m, 2] - sh_z) * np.minimum(off, cap)
+    # ARM GIRTH (2026-08-10): the positioned arm is a razor-thin lateral SHEET (DV ~0.02 H) -> a thin streak in
+    # both the fate cloud and the skinned mesh (flesh adds no arm girth). Reshape each arm into a solid tapering
+    # cylinder about its shoulder->hand axis so it is a rounded limb. Only once the arm is extended/posed (adult).
+    if arm.any() and (pose_a > 1e-3 or grow > 1.0):
+        Hh = np.ptp(Q[:, 0]) + 1e-9
+        for sgn in (1.0, -1.0):
+            m = arm & (np.sign(Q[:, 2]) == sgn)
+            if m.sum() >= 12:
+                _arm_tube(Q, m, r0=ARM_RADIUS_FRAC * Hh)
     if leg.any() and pose_l < 1e-3 and lg <= 1.0:
         hipx = np.percentile(x[leg], 88)
         Q[leg, 0] = hipx - (hipx - x[leg]) * lg                                 # bud stage: just grow the length
@@ -885,7 +1001,9 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
         Hh = np.ptp(x) + 1e-9
         hipband = body & (np.abs(x - hipx0) < 0.06 * Hh)
         hipz = np.percentile(np.abs(z[hipband]), 70) if hipband.sum() > 8 else 0.85 * w   # the PELVIS half-width
-        hipz = min(hipz, 0.085 * Hh)                             # cap to a real hip attachment (~0.17 H bi-femoral)
+        hipz = float(np.clip(hipz, 0.055 * Hh, 0.085 * Hh))     # FLOOR + cap: the two legs must stay a real hip-width
+        #                                                         apart (~0.11-0.17 H bi-femoral), not collapse to a
+        #                                                         central spike (the "gown"/cone that reads as no legs).
         for sgn in (1.0, -1.0):
             m = leg & (np.sign(z) == sgn)
             if m.sum() < 4:
@@ -893,8 +1011,43 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
             hipx = np.percentile(x[m], 88)                       # hip = top (AP) of this leg
             hz = sgn * hipz                                      # seat the leg at the hip width (not the trunk width)
             Q[m, 0] = hipx - (hipx - x[m]) * g                   # lengthen the leg downward on leg_ext
-            Q[m, 2] = hz + (z[m] - hz) * (1.0 - 0.85 * pose_l)   # tighten hard into a column (0.55 -> 0.85)
+            # CONVERGE toward the ankle: the leg column drifts inward from hip to foot (feet closer than hips), so
+            # the ankles/feet read narrow like a real standing figure instead of two parallel posts.
+            lf = np.clip((hipx - Q[m, 0]) / (0.52 * Hh), 0.0, 1.0)           # 0 hip .. 1 foot
+            hz_t = hz * (1.0 - 0.42 * lf * pose_l)
+            # tighten each leg toward its (tapered) column centre, keeping real thigh thickness (0.5, not 0.85 which
+            # collapsed the legs to thin lines meeting at the midline).
+            Q[m, 2] = hz_t + (z[m] - hz) * (1.0 - 0.5 * pose_l)
     return Q
+
+
+def feet_mesh(Q, fate, frac=1.0):
+    """Genome-plausible pentadactyl autopod at each leg's distal tip (the Hox13 autopod territory).
+    The big toe is MEDIAL by the limb's own L/R axis (hallux toward the midline on BOTH feet), via the
+    chirality flip in hand_foot_skin. Digit COUNT is the pentadactyl default of the limb head (set by
+    the Turing / lateral-inhibition wavelength elsewhere in the framework); full per-digit morphogenesis
+    is future work -- this is a schematic autopod that does not violate the genome, NOT a MakeHuman graft.
+    The thin, stumpy realisation is the kinematics-without-physics limitation (no soft-tissue settling).
+    Laid frame (x=AP head+, +y ventral, z=ML). Returns (verts, faces) with FIXED counts (2 * HFS.NV) so
+    the movie can emit the skin faces once. `frac` in [0,1] ramps the autopod out with maturation."""
+    from medic import hand_foot_skin as HFS
+    x, z = Q[:, 0], Q[:, 2]
+    H = float(np.ptp(x)) + 1e-9
+    apf = (x - x.min()) / H
+    leg = (np.asarray(fate) == LIMB) & (apf < 0.5)
+    span = 0.055 * H
+    length = 0.14 * H * float(np.clip(0.15 + 0.85 * frac, 0.15, 1.0))   # autopod emerges late (Hox13)
+    V, Fc, off = [], [], 0
+    for sgn in (-1.0, 1.0):                                  # left (z<0), right (z>0)
+        m = leg & (np.sign(z) == sgn)
+        if m.sum() >= 6:
+            legc = Q[m]
+            tip = legc[legc[:, 0] < np.percentile(legc[:, 0], 15)].mean(0)   # distal ankle
+        else:
+            tip = np.array([x.min(), 0.0, sgn * 0.10 * H])   # fallback: bud tip on this side
+        v, f = HFS.build(tip, [0, 1.0, 0], [-1.0, 0, 0], span, length, "foot", flip=(tip[2] < 0))
+        V.append(v); Fc.append(f + off); off += len(v)
+    return np.vstack(V).astype(np.float32), np.vstack(Fc).astype(np.int32)
 
 
 def _limb_grow(t):
@@ -1260,8 +1413,19 @@ def build(source="model", json_path=None):
         # (grow_limbs, now extending PAST the bud) + the fetal curl unfurling -- so infant and adult
         # carry the model's OWN fates and topology. There is no handoff: the same cells run all the
         # way through, coloured by their real cloud fate the whole time.
-        reg_fate = S0col_fate                               # the cloud's real fates ARE the identity
-        print(f"[C] model maturation: cloud embryo -> fetus -> infant -> adult ({N_MESH} frames) ...")
+        # ===== UNIFY the three views onto ONE proportioned cloud =====
+        # Mature the SAME rich build_base cloud the anatomy reveal uses (girdles / organs / condensation + the
+        # DV & ML anthropometric envelopes -> posture_silhouette ~85%), NOT the coarse simulate cloud, so the
+        # adult SKIN and the REVEAL are one proportioned Vitruvian body instead of a blob + a splayed scatter.
+        from medic.adult_persistence_audit import build_base as _build_base
+        _Braw, _BFraw = _build_base(max(N_R, 30000))
+        _bidx = _rep_idx(_BFraw, N_R, rng)
+        B0 = _Braw[_bidx].astype(float); BF = _BFraw[_bidx]
+        _hmB = np.isin(BF, headf)                            # orient the head to +x (same convention as the cloud)
+        if _hmB.any() and B0[_hmB, 0].mean() < np.median(B0[:, 0]):
+            B0[:, 0] = -B0[:, 0]
+        reg_fate = BF                                        # the build_base cloud's real fates ARE the identity
+        print(f"[C] model maturation: build_base cloud -> adult ({N_MESH} frames; unified with the reveal) ...")
         from medic.skin_shell_head import mesh as _skin_mesh   # the epidermal-boundary skin SURFACE
         from medic.flesh_surface_head import flesh_skin as _flesh_skin   # skin draped over MUSCLE+FAT, not bone
         from medic.fine_relief_head import body_relief as _body_relief    # the surface-muscle silhouette + six-pack
@@ -1269,32 +1433,36 @@ def build(source="model", json_path=None):
         adult_len = 3.2
         labels = [(0.10, "early fetus"), (0.28, "fetus"), (0.46, "newborn"), (0.64, "infant"),
                   (0.80, "child"), (0.93, "adolescent"), (1.01, "adult")]
-        limbmask = (S0col_fate == LIMB)
+        limbmask = (BF == LIMB)
         for i in range(N_MESH):
             f = i / (N_MESH - 1)
-            Q = mature_cloud(S0, S0col_fate, f, MATURE_SEARCHED)   # searched allometry -> relaxes into the atlas
+            Q = mature_cloud(B0, BF, f, MATURE_SEARCHED)     # searched allometry on the build_base cloud
             t = 0.55 + 0.45 * f
             Q = grow_limbs(Q, limbmask, _limb_grow_model(t, MATURE_SEARCHED["limb_ext"]),
                            _limb_grow_model(t, MATURE_SEARCHED.get("leg_ext", MATURE_SEARCHED["limb_ext"])),
-                           pose=f)   # arms/legs swing DOWN by maturation stage (decoupled from extension)
+                           pose=f)   # arms Vitruvian (out); legs stand; length capped
             tgt = 0.9 + (adult_len - 0.9) * f ** 1.2        # visible growth 0.9 -> 3.2 (convex)
             Q *= tgt / _long_axis_len(Q)
-            Q = tuck_limbs(Q, S0col_fate, _curl_amt(t))     # fetal tuck early, releasing as it unfurls
-            Q = fetal_curl(Q, _curl_amt(t), S0col_fate)     # fetal C (spine to the OUTSIDE), unfurling to adult
-            Q = Q - _chest(Q, S0col_fate)                   # anchor the chest so it grows in place
+            Q = tuck_limbs(Q, BF, _curl_amt(t))             # fetal tuck early, releasing as it unfurls
+            Q = fetal_curl(Q, _curl_amt(t), BF)             # fetal C (spine to the OUTSIDE), unfurling to adult
+            Q = Q - _chest(Q, BF)                           # anchor the chest so it grows in place
             lab = next(l for thr, l in labels if f < thr)
-            sv, sf = _flesh_skin(Q, S0col_fate)              # skin draped over the MUSCLE+FAT (not the bone), so
+            sv, sf = _flesh_skin(Q, BF)                      # skin draped over the MUSCLE+FAT (not the bone), so
             #                                                  the muscle silhouette reads through the epidermal shell
-            sv, _ = _body_relief(sv, Q, S0col_fate, amp=f)   # the surface-muscle RELIEF (deltoid/pec/lat/glute/
+            sv, _ = _body_relief(sv, Q, BF, amp=f)           # the surface-muscle RELIEF (deltoid/pec/lat/glute/
             #                                                  six-pack), blended by f -> smooth infant, muscled adult
+            n_flesh = len(sv)
+            fv, ff = feet_mesh(Q, BF, frac=f)                # genome-plausible autopod at each ankle (hallux medial)
+            sv = np.vstack([sv, fv])                         # feet join the skin surface (were bare stumps before)
             if skin_faces is None:
-                skin_faces = sf                              # fixed topology -> store faces ONCE
+                skin_faces = np.vstack([sf, ff + n_flesh])   # fixed topology (flesh + both feet) -> store ONCE
             skin_op = 0.30 + 0.35 * f                        # skin firms up as the body matures
-            out_frames.append(_emit(Q, S0col_fate, np.full(N_R, NEUT), "mesh",
+            out_frames.append(_emit(Q, BF, np.full(N_R, NEUT), "mesh",
                                    f"model · {lab} (allometric maturation of the cell cloud)", t,
                                    panel_mesh(f, morphing=(1 - f)), skin=sv, skin_op=skin_op))
         Q_adult = Q                                         # the finished adult cloud (laid, centred)
-        skin_adult_v = _body_relief(_flesh_skin(Q_adult, S0col_fate)[0], Q_adult, S0col_fate, amp=1.0)[0]  # adult FLESHED + muscled skin (dissolves in the reveal)
+        _sa = _body_relief(_flesh_skin(Q_adult, BF)[0], Q_adult, BF, amp=1.0)[0]  # adult FLESHED + muscled skin (dissolves in the reveal)
+        skin_adult_v = np.vstack([_sa, feet_mesh(Q_adult, BF, frac=1.0)[0]])   # feet on the adult reveal skin too (match skin_faces)
 
     # ---- Phase D: reveal the MODEL'S OWN integrated anatomy (its genome-derived systems, not the atlas) --
     print(f"[D] anatomy: adult skin -> the model's OWN integrated anatomy ({N_REVEAL} reveal + {N_HOLD} hold) ...")
@@ -1338,6 +1506,10 @@ def build(source="model", json_path=None):
         T, Tf = A_pos, A_fate
         ap_panel = panel_anatomy(counts)
         stageD = f"anatomy · Hill-organ atlas · {counts['bones']} bones · {counts['muscles']} muscles"
+    # UNIFIED reveal: dissolve the skin to expose THIS proportioned cloud's OWN cells, coloured by their fate
+    # (bone / muscle / organ / ...), NOT a separate scattered anatomy cloud -- so the reveal is the same Vitruvian
+    # body with its skin off. The organ SOLID surfaces (aligned to Q_adult) stay overlaid.
+    T, Tf = Q_adult, reg_fate
     # DISSOLVE the skin in place to reveal the internal parts (each point flips at its own random threshold).
     S, Sf = Q_adult, reg_fate
     thr = rng.random(N_R)
@@ -1368,6 +1540,11 @@ def build(source="model", json_path=None):
     json.dump(doc, open(jp, "w"))
     print(f"saved {jp}  ({len(out_frames)} frames, {jp.stat().st_size/1e6:.1f} MB)")
     HTML.write_text(VIEWER, encoding="utf-8")
+    try:
+        from medic.viewer_tabs import augment as _augment_tabs
+        _augment_tabs(HTML)                     # re-apply Gray's + NCA+LLM tabs + reveal toggle (survives re-render)
+    except Exception as _e:
+        print(f"  [viewer_tabs augment failed: {_e}]")
     print(f"saved {HTML}")
 
 

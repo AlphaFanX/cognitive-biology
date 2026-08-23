@@ -105,7 +105,34 @@ def _silhouette(P, axis, n=90, plo=4, phi=96, smooth=3):
     return xs, lo, hi
 
 
-def flesh_skin(body, F, push=0.06, layers=3, rng=None):
+def _model_muscle_bellies(body, F, n_per=60, rng=None):
+    """Grow a dense fusiform belly for each named muscle from the body's OWN skeleton (carve_by_action_line gives
+    O/I in the model frame) -- the mass that pushes the skin into the muscle silhouette. Self-contained (no
+    integrated_body import -> no circular dep); returns muscle cells in the body frame, or empty on any failure."""
+    if rng is None:
+        rng = np.random.default_rng(0)
+    try:
+        from medic.limb_muscle_head import carve_by_action_line
+        _mus, _assign, muscles, O, I = carve_by_action_line(body, F)
+    except Exception:
+        return np.zeros((0, 3))
+    out = []
+    for m in range(len(muscles)):
+        o, i = np.asarray(O[m], float), np.asarray(I[m], float)
+        seg = i - o; L = float(np.linalg.norm(seg))
+        if L < 1e-6:
+            continue
+        u = seg / L
+        ref = np.array([0.0, 1.0, 0.0]) if abs(u[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+        e1 = np.cross(u, ref); e1 /= np.linalg.norm(e1) + 1e-9; e2 = np.cross(u, e1)
+        t = rng.random(n_per)
+        r = 0.09 * L * np.sqrt(np.clip(1 - (2 * t - 1) ** 2, 0, 1)) * np.sqrt(rng.random(n_per))
+        th = rng.random(n_per) * 2 * np.pi
+        out.append(o + t[:, None] * seg + (r * np.cos(th))[:, None] * e1 + (r * np.sin(th))[:, None] * e2)
+    return np.vstack(out) if out else np.zeros((0, 3))
+
+
+def flesh_skin(body, F, push=0.06, layers=3, rng=None, with_bellies=True):
     """The MODEL-NATIVE flesh: given a model body cloud (laid frame x=AP,y=DV,z=ML) and its fates, drape the skin
     over the MUSCLE+FAT rather than the bone. The model's own Muscle-fate cells are thickened into SUPERFICIAL
     bellies (pushed radially toward the surface + jittered into mass) and a subcutaneous fat shell is added over
@@ -128,6 +155,10 @@ def flesh_skin(body, F, push=0.06, layers=3, rng=None):
             span = float(np.ptp(body)) + 1e-9
             for _ in range(layers):
                 add.append(b + rng.normal(size=b.shape) * 0.012 * span)   # thicken into a belly of mass
+    if with_bellies:                                             # grow real per-muscle bellies from the skeleton
+        b = _model_muscle_bellies(body, F, rng=rng)              # (fixes thin legs: base has little leg Muscle-fate)
+        if len(b):
+            add.append(b)
     layer = np.vstack([body] + add) if add else body
     fat = _subcutaneous_fat(layer, frac=0.04, n=max(2000, len(layer) // 6), rng=rng)
     # anterior (ventral) sign so the FEET point FORWARD (the way the FACE looks). The EYES are the definitive

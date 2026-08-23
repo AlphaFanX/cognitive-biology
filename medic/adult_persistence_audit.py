@@ -160,7 +160,11 @@ def build_base(ne=NE):
     P, V, F = _symmetrize(frames[-1][3], frames[-1][4], frames[-1][5])
     c = P.mean(0); c[2] = 0.0
     scale = 0.9 / _long_axis_len(P)
-    base = flex(shape_limbs((P - c) * scale, F, 1.0, LIMB), 1.0)     # the movie's final cloud basis (S0), straight
+    # POSTURE: the adult basis must STAND STRAIGHT. flex(f) is the developmental cephalo-caudal arc; at f=1 it
+    # holds a ~24 deg whole-body bow (the "lean" seen in side view). The adult has unfurled that flexure, so build
+    # the basis at flex=0 (the straight limit). flex is a RIGID arc applied uniformly before parts are identified,
+    # so straightening keeps rib<->vertebra articulation intact (unlike a post-hoc DV shear). See _lean_diag.
+    base = flex(shape_limbs((P - c) * scale, F, 1.0, LIMB), 0.0)     # the movie's final cloud basis (S0), straight
     # orient the head to the HIGH-AP end (apf~1), consistent with the Phase-D atlas, so the silhouette
     # profile + organ addresses compare head-to-head (not the weaker mean-x>0 test, which left the body
     # anti-aligned to the atlas when it extended far in +x).
@@ -195,6 +199,69 @@ def build_base(ne=NE):
     # condense on themselves rather than merging to the midline, and the organ's centroid -- its atlas address --
     # is preserved. Read-only on non-organ cells.
     base = _condense_organs(base, F)
+    # LATERALITY (Nodal/Pitx2 head): the cloud is grown z-symmetric, so the lateralised viscera sit on the
+    # midline and laterality is absent (medic.gray_arrangement_objective measured mean lateral offset ~0). Place
+    # each on its canonical side -- heart/spleen/stomach left, liver right. Read-only per organ; lazy import.
+    from medic.laterality_head import lateralize
+    base = lateralize(base, F)
+    # HEART TUBE (looped): the heart is grown as a compact BLOB with spatially intermixed chamber labels, so its
+    # chambers have no sequence (medic.gray_arrangement_objective: geodesic separation ~0). Reshape it into the
+    # D-looped cardiac tube and re-assign chambers by arc length (atrium->ventricle->outflow), centred on the
+    # heart's own (lateralised, descended) centroid so its address is kept. Read-only on every non-heart cell.
+    from medic.heart_tube_head import apply as _heart_tube
+    base, F = _heart_tube(base, F)
+    # ORGAN ASPECT (stage-1 shape knob): give each aspect-fixable organ the PCA-axis aspect that best matches its
+    # isolated canonical mesh (medic.organ_shape_search's D2 knob search), volume-preserving so the address+size
+    # are kept. Excludes heart (heart_tube), subheads, bones, and topology-limited organs. Read-only per organ.
+    from medic.organ_aspect_head import apply as _organ_aspect
+    base = _organ_aspect(base, F)
+    # EAR: shape the diffuse Otic blob into a real pinna flush to the lateral head (was shapeless + sticking out).
+    from medic.ear_head import shape_ears
+    base = shape_ears(base, F)
+    # CLEANUP: thin the spinal-cord DV wedge -> a cord; shrink the oversized heart; compact the large eye blobs.
+    from medic.body_cleanup_head import apply as _cleanup
+    base = _cleanup(base, F)
+    # NECK: the cervical band is grown WIDER than the shoulders (no neck); pinch it to the MEASURED ~29% of
+    # shoulder width over the measured ~11%-of-stature cervical length (medic.bp3d_insitu_head), blended at both
+    # ends so the head sits on a neck. Read-only outside the band; limbs excluded. Lazy import.
+    from medic.neck_head import build_neck as _neck
+    base = _neck(base, F)
+    # SKULL: grow the cranial vault as a DENSE shell molded by the brain (medic.skull_articulation_head) -- the
+    # vault bones were labelled on a diffuse blob (articulation ~44%); the brain is the physical mold, and the
+    # measured BodyParts3D territories set only which patch is which bone. Adds dome cells -> returns (base, F).
+    from medic.skull_articulation_head import build as _skull
+    base, F = _skull(base, F)
+    # ARM: replace the sparse (unified build_base) arm bud with a DENSE growth-activity upper limb at its calibrated
+    # human length (~0.44 H), so the arm is solid + full-length instead of a stretched stub. Read-only on non-arm cells.
+    from medic.grown_arm_head import grow_arms, grow_feet
+    base, F = grow_arms(base, F)
+    base, F = grow_feet(base, F)                                 # a forward-projecting foot at each ankle (was a bare tip)
+    # DV SPREAD (measured placement): the viscera are grown bunched ventral with no dorso-ventral differentiation;
+    # place each at its MEASURED in-situ depth (medic.bp3d_insitu_dv, from the BodyParts3D meshes in the canonical-
+    # human frame -- kidney/spleen/lung dorsal, heart/liver/gut ventral), read-only per organ, moved as a coherent
+    # body so shape + AP level are kept. The dorso-ventral analogue of the laterality head. Run LAST so it measures
+    # the FINAL per-band DV envelope: run mid-build, later heads (cleanup shrinks the heart, neck, skull adds ~28k
+    # dome cells) shift the envelope it targeted against, so the viscera drifted off their measured depth (kidney
+    # landed 0.75 vs its 0.66 target). Lazy import.
+    from medic.dv_spread_head import spread as _dv_spread
+    base = _dv_spread(base, F)
+    # ABDOMINAL PACKING (mechanism, medic.abdominal_packing_head): the "organs are fluid" soft-body packing that
+    # would EARN the abdominal viscera's DV from their 3-class PERITONEAL RELATIONSHIP (intraperitoneal /
+    # secondarily-retroperitoneal / retroperitoneal), instead of dv_spread's per-organ MEASURED placement. It is
+    # the glass-box mechanism -- BUT at current fidelity the class-pull gives DV rank-corr ~0.74 vs the measured
+    # fit's ~0.86, so it is OFF by default (flip to enable). Integrity holds 13/13 either way; it re-relaxes only
+    # the abdominal organs as coherent DV bodies (heart/lung keep their measured depth from dv_spread above).
+    # To beat the fit it needs the within-class order (mesenteric mobility / supine gas-buoyancy) + a fixed
+    # contact gate (the DV-stacking de-overlap currently over-fires: kidney pushed to 0.89 -> corr 0.36).
+    _USE_ABDOMINAL_PACKING = False
+    if _USE_ABDOMINAL_PACKING:
+        from medic.abdominal_packing_head import pack as _abd_pack
+        base = _abd_pack(base, F, contact=False)
+    # NOTE (2026-08-05): the OTHER suborgan coordinate-cuts were audited (medic.suborgan_reassign_head) and are
+    # topologically CORRECT at this model's resolution -- the gut chain is AP-aligned (attractor agrees 0.98), the
+    # kidney DV cut already equals the radial-shell split (agrees 1.00), and the brain/eye are AP-ordered regions
+    # a naive geodesic would scramble (the brain is a chain+cerebellar-branch). Only the FOLDED heart genuinely
+    # needed the attractor (the tube above). So no further subhead reassignment is wired.
     return base, F
 
 

@@ -241,11 +241,16 @@ def mesh(P, n_slice=48, n_sec=24, crotch_f=0.42, ventral=None):
         return sel.mean(0), float(np.ptp(cells[:, col]))
 
     appendages = []
-    for arm, sgn in ((armR, 1.0), (armL, -1.0)):               # hands: fingers point outward along +-ML
-        tip, reach = _tip(arm, 2, sgn, 90)
-        if tip is None:
-            tip = np.array([torso[:, 0].mean(), torso[:, 1].mean(), 0.0]); reach = 0.3
-        appendages.append(HFS.build(tip, [0, 0, sgn], [0, 1, 0], 0.18 * reach + 0.03, 0.30 * reach + 0.03, "hand"))
+    tcxyz = torso.mean(0)
+    for arm, sgn in ((armR, 1.0), (armL, -1.0)):               # hand at the arm's FAR end (pose-agnostic: works for
+        if len(arm) >= 8:                                      # arms-down too), fingers pointing away from the torso
+            d = np.linalg.norm(arm - tcxyz, axis=1)
+            tip = arm[d >= np.percentile(d, 88)].mean(0); reach = float(np.ptp(d))
+            ax = tip - tcxyz; ax = ax / (np.linalg.norm(ax) + 1e-9)
+        else:
+            tip = np.array([torso[:, 0].mean(), torso[:, 1].mean(), sgn * 0.1]); reach = 0.3; ax = np.array([0.0, 0.0, sgn])
+        up = np.array([1.0, 0.0, 0.0]) if abs(ax[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        appendages.append(HFS.build(tip, list(ax), list(up), 0.18 * reach + 0.03, 0.30 * reach + 0.03, "hand"))
     # anterior (toes point FORWARD): use the ventral sign from the fated cloud if given, else estimate from DV skew.
     dvsign = float(ventral) if ventral is not None else (1.0 if torso[:, 1].mean() >= P[:, 1].mean() else -1.0)
     H = float(np.ptp(x)) + 1e-9                                 # stature: size the feet off the body, not the thin leg
@@ -255,9 +260,8 @@ def mesh(P, n_slice=48, n_sec=24, crotch_f=0.42, ventral=None):
             tip = np.array([leg[:, 0].min(), lo[:, 1].mean(), lo[:, 2].mean()])  # ANCHOR at the true leg bottom
         else:
             tip = np.array([x.min(), torso[:, 1].mean(), 0.0])
-        # big toe MEDIAL on BOTH feet: mirror the fan for the -ML-side foot so both big toes face the midline
         appendages.append(HFS.build(tip, [0, dvsign, 0], [-1, 0, 0], 0.055 * H, 0.14 * H, "foot",
-                                    flip=(tip[2] < 0)))
+                                    flip=(tip[2] < 0)))   # big toe MEDIAL on both feet
     for v, f in appendages:
         V.append(v); Fc.append(f + off); off += len(v)
     Vout = np.vstack(V).astype(np.float32)

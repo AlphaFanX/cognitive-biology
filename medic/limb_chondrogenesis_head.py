@@ -58,7 +58,9 @@ def carve(base, F, pd_bounds=None):
     """The limb chondrogenesis head. `pd_bounds` = the two PD cut fractions (stylopod|zeugopod|autopod),
     the tunable knob; None -> the tuned values. Returns per-limb (points, PD coord, segment, bone name)."""
     if pd_bounds is None:
-        tk = tuned("limb_chondro", {"b1": 0.34, "b2": 0.67})
+        # stylopod (femur/humerus) is LONGER than the zeugopod (Gray's: the femur is the longest bone; the
+        # scorecard found femur < tibia). b1=0.38 -> stylopod 0.38 > zeugopod 0.30 > autopod 0.32.
+        tk = tuned("limb_chondro", {"b1": 0.38, "b2": 0.68})
         pd_bounds = (tk["b1"], tk["b2"])
     segs_def = [("stylopod", 0.0, pd_bounds[0]), ("zeugopod", pd_bounds[0], pd_bounds[1]),
                 ("autopod", pd_bounds[1], 1.01)]
@@ -73,6 +75,28 @@ def carve(base, F, pd_bounds=None):
         if np.linalg.norm(Q[pd.argmax()] - body_c) < np.linalg.norm(Q[pd.argmin()] - body_c):
             pd = -pd
         pdn = (pd - pd.min()) / (np.ptp(pd) + 1e-9)          # 0 proximal .. 1 distal (Meis->Hoxa13)
+        # GIRTH = the PERICHONDRIUM: shrink the paddle's width to a fixed fraction of the bud's OWN native
+        # girth -- a LENGTH-INDEPENDENT perichondrial radius, NOT a fraction of PD LENGTH. The old
+        # WIDTH_FRAC*(PD length) rule shrank girth AS the bone lengthened, so long bones became NEEDLES
+        # (elong ~7.4 on real cells -> the thin skeletal-streak arm). The Sox9 condensation instead sets an
+        # absolute perichondrial girth, so a long bone stays a proper rod (elong ~3-5, physiological) at any
+        # length. Arm LENGTH is still preserved (PD position kept); only the width shrinks. This wires the
+        # grow-from-field result of medic/sox9_condensation_head.py into the build.
+        PERI = tuned("limb_chondro", {"peri_frac": 0.18}).get("peri_frac", 0.18)
+        BULGE = tuned("limb_chondro", {"epiphysis": 1.6}).get("epiphysis", 1.6)
+        proj = C @ pc
+        perp = C - np.outer(proj, pc)                         # offset perpendicular to the PD axis
+        long_m = pdn < (pd_bounds[1] if pd_bounds else 0.67)  # stylopod + zeugopod only (autopod stays a SHORT bone)
+        # EPIPHYSES: each long bone is WIDER at its two ends (the head + condyles / metaphyses) than at its
+        # shaft -- Gray's, and the scorecard's femur check (end/shaft radius). Widen the perichondrial girth
+        # toward each SEGMENT's ends (fraction 0 and 1 within stylopod / zeugopod) with a U-shaped profile.
+        seg_frac = np.zeros(len(Q))
+        for lo, hi in ((0.0, pd_bounds[0]), (pd_bounds[0], pd_bounds[1])):
+            ms = (pdn >= lo) & (pdn < hi)
+            seg_frac[ms] = (pdn[ms] - lo) / (hi - lo + 1e-9)
+        girth = PERI * (1.0 + BULGE * (2.0 * seg_frac - 1.0) ** 2)     # wide ends (epiphyses), narrow shaft
+        Q = Q.copy()
+        Q[long_m] = Q.mean(0) + np.outer(proj[long_m], pc) + perp[long_m] * girth[long_m, None]
         seg = np.empty(len(Q), dtype=object)
         for sname, lo, hi in segs_def:
             seg[(pdn >= lo) & (pdn < hi)] = sname

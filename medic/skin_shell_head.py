@@ -255,7 +255,9 @@ def mesh(P, n_slice=48, n_sec=24, crotch_f=0.42, ventral=None):
             tip = np.array([leg[:, 0].min(), lo[:, 1].mean(), lo[:, 2].mean()])  # ANCHOR at the true leg bottom
         else:
             tip = np.array([x.min(), torso[:, 1].mean(), 0.0])
-        appendages.append(HFS.build(tip, [0, dvsign, 0], [-1, 0, 0], 0.055 * H, 0.14 * H, "foot"))
+        # big toe MEDIAL on BOTH feet: mirror the fan for the -ML-side foot so both big toes face the midline
+        appendages.append(HFS.build(tip, [0, dvsign, 0], [-1, 0, 0], 0.055 * H, 0.14 * H, "foot",
+                                    flip=(tip[2] < 0)))
     for v, f in appendages:
         V.append(v); Fc.append(f + off); off += len(v)
     Vout = np.vstack(V).astype(np.float32)

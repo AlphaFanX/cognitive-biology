@@ -42,13 +42,17 @@ def _digit(base, axis, up, length, radius, taper=0.6):
     return verts, np.array(faces)
 
 
-def build(tip, out_dir, up_dir, span, length, kind="hand"):
+def build(tip, out_dir, up_dir, span, length, kind="hand", flip=False):
     """A hand or foot at `tip`, fanning five digits from a palm/sole. `out_dir` points along the limb (fingers
     point away from the wrist), `up_dir` is the palm normal, `span` the palm width, `length` the digit length.
+    `flip` reverses the digit fan across the palm (chirality) so the thumb / big toe sits on the opposite
+    side -- needed to mirror a hand/foot to the contralateral side (big toes medial on BOTH feet).
     Returns (verts, faces) with FIXED counts (independent of inputs)."""
     out_dir = np.asarray(out_dir, float); out_dir = out_dir / (np.linalg.norm(out_dir) + 1e-9)
     up_dir = np.asarray(up_dir, float); up_dir = up_dir / (np.linalg.norm(up_dir) + 1e-9)
     spread = np.cross(out_dir, up_dir); spread = spread / (np.linalg.norm(spread) + 1e-9)  # across the palm
+    if flip:
+        spread = -spread                                   # mirror the fan for the contralateral side
     V, Fc, off = [], [], 0
     # digits fanned across the palm, slight length variation (thumb/big-toe shorter, middle longest)
     rel = np.array([0.72, 0.95, 1.0, 0.92, 0.75]) if kind == "hand" else np.array([1.0, 0.9, 0.78, 0.66, 0.55])

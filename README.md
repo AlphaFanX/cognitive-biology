@@ -9,6 +9,15 @@ Code accompanying the paper:
 > Manuscript PDF: [`paper/cognitive_biology_paper_v2.pdf`](paper/cognitive_biology_paper_v2.pdf)
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20722139.svg)](https://doi.org/10.5281/zenodo.20722139)
+[![Model on Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-cognimed--nca--lgm-yellow)](https://huggingface.co/jacobsme/cognimed-nca-lgm)
+
+**The trained model is published on Hugging Face:
+[huggingface.co/jacobsme/cognimed-nca-lgm](https://huggingface.co/jacobsme/cognimed-nca-lgm)** —
+the complete NCA+LGM parameter set: the W0 kernel modules, the genome
+kernel/adapter partition, the per-allele adapter tables, the head maps and
+conductances, every derived result table, and the dense 3D atlas
+reconstructions. The whole model is 37 MB (CC-BY 4.0): its parameters are read
+from the genome through public databases, not fitted at scale.
 
 This repository contains a curated, reproducible subset of the computational
 framework described in the paper. It is **not** the full working tree — only

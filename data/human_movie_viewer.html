@@ -1,0 +1,366 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Genome → tetrapod → human</title>
+<style>
+  html,body{margin:0;height:100%;background:#0d1017;color:#cbd5e1;font:13px system-ui;overflow:hidden}
+  #ui{position:fixed;top:10px;left:12px;z-index:3;background:#0d1017cc;padding:9px 12px;border-radius:9px;max-width:48%}
+  #ui b{color:#e8eef4}#stage{color:#7dd3fc;font-size:14px;margin-top:3px}#legend{color:#8091a8;margin-top:4px}
+  #phase{margin-top:6px}#phase span{padding:2px 9px;border-radius:6px;margin-right:6px;background:#1b2130;color:#66748c}
+  #phase span.on{background:#2b6cb0;color:#fff}
+  #panel{position:fixed;top:10px;right:12px;bottom:12px;width:310px;z-index:3;background:#0d1017e8;
+         padding:10px 12px;border-radius:9px;overflow-y:auto}
+  #panel h3{margin:0 0 6px;font-size:13px;color:#e8eef4}
+  #panel .hint{color:#6b7688;font-size:10px;margin:0 0 6px}
+  #clk{margin:4px 0 8px}#clk .lab{font-size:11px;color:#8091a8;display:flex;justify-content:space-between}
+  #clk .track{height:5px;background:#1b2130;border-radius:4px;margin-top:3px;overflow:hidden}
+  #clk .fill{height:100%;background:#7dd3fc}
+  #panel .sub{color:#cbd5e1;font-size:11px;font-weight:600;letter-spacing:.03em;margin:9px 0 3px;
+              border-top:1px solid #263043;padding-top:6px}
+  #panel .sub .q{color:#6b7688;font-weight:400}
+  .row{margin:5px 0}
+  .row .nm{font-size:12px;color:#dbe4ef}
+  .row .rl{font-size:10px;color:#7f8ca3;line-height:1.25}
+  .row .track{height:6px;background:#1b2130;border-radius:4px;margin-top:2px;overflow:hidden}
+  .row .fill{height:100%;background:#4b9cff}
+  .row.span .nm{color:#ffd23a}
+  .row.span .fill{background:#ffd23a}
+  .tag{font-size:9px;padding:1px 5px;border-radius:4px;margin-left:5px;vertical-align:1px}
+  .tag.cloud{background:#14324a;color:#7dd3fc}.tag.mesh{background:#3a2a12;color:#ffcf7a}
+  .tag.both{background:#3a3212;color:#ffd23a}
+  #bar{position:fixed;bottom:12px;left:12px;right:334px;z-index:3;display:flex;align-items:center;gap:10px;
+       background:#0d1017cc;padding:8px 12px;border-radius:9px}
+  button{font:13px system-ui;background:#1b2130;color:#e2e8f0;border:1px solid #33405a;border-radius:6px;padding:4px 12px;cursor:pointer}
+  button.on{background:#2b6cb0;border-color:#2b6cb0}input[type=range]{flex:1}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+  #key{margin-top:5px}#key span{margin-right:10px;white-space:nowrap;font-size:11px}
+
+  /* --- extra tabs --- */
+  #graysPanel h3,#ncaPanel h3{margin:0 0 4px;font-size:13px;color:#e8eef4}
+  #gsum{color:#8091a8;font-size:10px;margin-bottom:6px}
+  #gsearch,#nsearch{width:100%;box-sizing:border-box;background:#141a26;border:1px solid #2a3547;color:#cbd5e1;border-radius:6px;padding:4px 7px;font:11px system-ui;margin-bottom:6px}
+  .gcat{color:#cbd5e1;font-size:11px;font-weight:600;letter-spacing:.03em;margin:8px 0 2px;border-top:1px solid #263043;padding-top:5px;display:flex;justify-content:space-between}
+  .gcat .cs{color:#6b7688;font-weight:400}
+  .gpart{display:flex;align-items:center;gap:6px;padding:2px 5px;border-radius:5px;cursor:pointer;font-size:11px}
+  .gpart:hover{background:#1b2233}.gpart.sel{background:#24466e}
+  .gpart .sd{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .gpart .gn{flex:1;color:#dbe4ef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gpart .gsc{font-variant-numeric:tabular-nums;font-size:10px}
+  .gpart .tf{color:#8091a8;font-size:9.5px}
+  #gdetail,#ndetail{border-top:1px solid #263043;margin-top:8px;padding-top:7px}
+  #gdetail .dt,#ndetail .dt{font-size:13px;color:#e8eef4;font-weight:600}
+  #gdetail .dm,#ndetail .dm{color:#8091a8;font-size:10px;margin-bottom:5px}
+  #gdetail .ck{display:flex;gap:6px;margin:3px 0;font-size:11px;line-height:1.3}
+  #gdetail .ck .mk{flex:0 0 auto;font-weight:700}
+  #gdetail .ck.pass .mk{color:#4ade80}#gdetail .ck.fail .mk{color:#f87171}
+  #gdetail .ck .cd{color:#93a0b5}#gdetail .cf{color:#c9d3e0;font-weight:500}
+  #narch{display:flex;flex-wrap:wrap;gap:3px;margin:4px 0 6px}
+  .achip{font-size:9.5px;padding:2px 6px;border-radius:5px;background:#182234;color:#8fb4e0;cursor:pointer;border:1px solid #223049;white-space:nowrap}
+  .achip:hover{background:#20304a}.achip.sel{background:#2b6cb0;color:#fff;border-color:#2b6cb0}
+  .vgrid{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;margin:2px 0}
+  .vgrid .vk{color:#8091a8}.vgrid .vv{color:#dbe4ef;font-variant-numeric:tabular-nums}
+  .vsub{color:#c9d3e0;font-weight:600;font-size:11px;margin:7px 0 2px}
+  .knob{background:#161d2b;border-radius:5px;padding:4px 6px;margin:3px 0;font-size:10.5px}
+  .knob .kg{color:#ffd23a;font-weight:600}.knob .kb{color:#7dd3fc}.knob .kd{color:#93a0b5}
+  #gplateBox{position:fixed;left:12px;bottom:60px;z-index:4;display:none;background:#0d1017ee;padding:9px;border-radius:10px;max-width:min(40vw,480px);box-shadow:0 6px 22px #000a}
+  #gplateBox img{width:100%;border-radius:6px;background:#e8e4dc;display:block}
+  #gplateBox .cap{color:#a8b8cc;font-size:11px;margin-top:6px;font-style:italic}
+</style></head>
+<body>
+<div id="loadwrap" style="position:fixed;inset:0;z-index:20;background:#0d1017;display:flex;flex-direction:column;
+     align-items:center;justify-content:center;color:#cbd5e1;font:14px system-ui">
+  <div style="margin-bottom:14px">Loading the movie — genome → human…</div>
+  <div style="width:340px;height:9px;background:#1b2130;border-radius:5px;overflow:hidden">
+    <div id="loadbar" style="width:0;height:100%;background:linear-gradient(90deg,#2b6cb0,#7dd3fc);transition:width .12s"></div></div>
+  <div id="loadpct" style="margin-top:9px;color:#7dd3fc;font-variant-numeric:tabular-nums">0%</div>
+</div>
+<div id="ui"><b>Genome → tetrapod → human — one clock, one clump of cells</b>
+<div id="legend">CLOUD generates (morphogenesis) · handoff · MESH matures (allometry). Drag to rotate, scrub the timeline.</div>
+<div id="phase"><span id="pA">A cloud</span><span id="pB">B handoff</span><span id="pC">C mesh</span><span id="pD">D anatomy</span></div>
+<div id="key"></div>
+<div id="stage">loading…</div></div>
+<div id="panel">
+<div id="moviePanel"><h3>What is dialing — by layer</h3>
+<div class="hint">gold = acts in BOTH phases (a kernel gene redeployed). genes are the knobs threaded through every layer. mesh-phase bar heights = real fitted knob moves (mouse→human builder: species adapter + maturation) and GWAS |β| (face/heart).</div>
+<div id="clk"><div class="lab"><span>◷ clock τ</span><span id="clkv">0.00</span></div><div class="track"><div class="fill" id="clkf" style="width:0%"></div></div></div>
+<div id="rows"></div></div>
+<div id="graysPanel" style="display:none"></div>
+<div id="ncaPanel" style="display:none"></div>
+</div>
+<div id="bar">
+  <button id="play">⏸ pause</button>
+  <input id="slider" type="range" min="0" max="0" value="0" step="1">
+  <button id="mode" class="on">anatomy</button>
+  <button id="grays">🦴 Gray's</button>
+  <button id="nca">🧠 NCA+LLM</button>
+  <button id="reveal">🔬 reveal</button>
+  <button id="rot">↻ auto-rotate</button>
+</div>
+<div id="gplateBox"></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+const params=new URLSearchParams(location.search);
+let cur=0, playing=params.get('pause')?false:true, last=0, FRAME_MS=110, mode='anat';
+const sc=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 500);
+const rn=new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+rn.setSize(innerWidth,innerHeight); rn.setPixelRatio(devicePixelRatio); document.body.appendChild(rn.domElement);
+sc.add(new THREE.AmbientLight(0xffffff,0.72));
+const _dl=new THREE.DirectionalLight(0xffffff,0.85); _dl.position.set(0.6,1,0.8); sc.add(_dl);
+const ctrl=new OrbitControls(cam, rn.domElement); ctrl.enableDamping=true; ctrl.autoRotateSpeed=1.1;
+window.cam=cam; window.ctrl=ctrl;   // exposed for scripted camera stills (paper figures)
+let DATA=null, pts=[], vmin=0, vmax=1, nf=0, skinMesh=null, skinIdx=null, showOrgans=true;
+window.addEventListener('keydown',e=>{ if(e.key==='o'||e.key==='O'){ showOrgans=!showOrgans; if(DATA) build(cur); } });
+const UNC=[0.5,0.55,0.6];
+// the skin SURFACE: a translucent epidermal-boundary mesh (fixed topology; verts stream per frame). depthWrite
+// off so the internal cell cloud shows THROUGH the skin -- a body with a silhouette, not a scatter.
+function mkSkin(verts, op){
+  const n=verts.length/3, P=new Float32Array(n*3);
+  for(let i=0;i<n;i++){ P[3*i]=verts[3*i+2]; P[3*i+1]=verts[3*i]; P[3*i+2]=verts[3*i+1]; }
+  if(!skinIdx){ skinIdx=[]; for(const f of DATA.skin_faces){ skinIdx.push(f[0],f[1],f[2]); } }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(P,3));
+  g.setIndex(skinIdx); g.computeVertexNormals();
+  const m=new THREE.MeshStandardMaterial({color:0xd8b49a, transparent:true, opacity:op,
+    side:THREE.DoubleSide, roughness:0.9, metalness:0.0, depthWrite:false});
+  return new THREE.Mesh(g,m);
+}
+// per-organ SURFACE solids: alpha-shape meshes, one per organ, coloured, shown during the anatomy reveal so an
+// organ reads as a Gray's-crisp SOLID instead of a point scatter. Same AP->Y / ML->X / DV->Z remap as the skin.
+let organMeshes=[];
+function mkOrgan(V, F, color, op){
+  const n=V.length/3, P=new Float32Array(n*3);
+  for(let i=0;i<n;i++){ P[3*i]=V[3*i+2]; P[3*i+1]=V[3*i]; P[3*i+2]=V[3*i+1]; }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(P,3));
+  g.setIndex(F); g.computeVertexNormals();
+  const m=new THREE.MeshStandardMaterial({color:new THREE.Color(color[0],color[1],color[2]),
+    transparent:true, opacity:op, side:THREE.DoubleSide, roughness:0.75, metalness:0.0, depthWrite:true});
+  return new THREE.Mesh(g,m);
+}
+function clearOrgans(){ for(const o of organMeshes){ sc.remove(o); o.geometry.dispose(); o.material.dispose(); } organMeshes=[]; }
+function vcol(vm){ let t=(vm-vmin)/(vmax-vmin+1e-9); t=Math.max(0,Math.min(1,t));
+  let a=[0.23,0.32,0.78],b=[0.93,0.93,0.93],c=[0.82,0.14,0.16];
+  if(t<0.5){let u=t*2;return[a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u,a[2]+(b[2]-a[2])*u];}
+  let u=(t-0.5)*2;return[b[0]+(c[0]-b[0])*u,b[1]+(c[1]-b[1])*u,b[2]+(c[2]-b[2])*u]; }
+function acol(fate){ return fate<0?UNC:DATA.anat[fate]; }
+// UPRIGHT + FRONT remap (AP->Y up, ML->X, DV->Z, belly toward camera) baked into a cheap GPU POINT CLOUD
+// (THREE.Points). Points render ~100k+ cells easily where instanced sphere-balls crash the iGPU at ~7k --
+// so this is what lets the viewer actually show the high cell count, finely.
+function mk(pos,col,size){
+  const n=pos.length/3, P=new Float32Array(n*3), C=new Float32Array(n*3);
+  for(let i=0;i<n;i++){ P[3*i]=pos[3*i+2]; P[3*i+1]=pos[3*i]; P[3*i+2]=pos[3*i+1];
+    C[3*i]=col[3*i]; C[3*i+1]=col[3*i+1]; C[3*i+2]=col[3*i+2]; }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(P,3));
+  g.setAttribute('color',new THREE.BufferAttribute(C,3));
+  return new THREE.Points(g,new THREE.PointsMaterial({size:size,vertexColors:true,sizeAttenuation:true}));
+}
+function build(i){
+  const fr=DATA.frames[i];
+  for(const p of pts){sc.remove(p);p.geometry.dispose();p.material.dispose();}
+  const N=fr.vm.length, hi=new Set(DATA.hi||[]);
+  const bp=[],bc=[],hp=[],hc=[];
+  for(let k=0;k<N;k++){
+    const f=fr.fate[k], c=(mode==='anat')?acol(f):vcol(fr.vm[k]);
+    if(mode==='anat' && hi.has(f)){ hp.push(fr.xyz[3*k],fr.xyz[3*k+1],fr.xyz[3*k+2]); hc.push(c[0],c[1],c[2]); }
+    else { bp.push(fr.xyz[3*k],fr.xyz[3*k+1],fr.xyz[3*k+2]); bc.push(c[0],c[1],c[2]); }
+  }
+  pts=[mk(bp,bc,0.013)]; if(hp.length) pts.push(mk(hp,hc,0.022));   // point-cloud cell sizes
+  for(const p of pts) sc.add(p);
+  if(skinMesh){ sc.remove(skinMesh); skinMesh.geometry.dispose(); skinMesh.material.dispose(); skinMesh=null; }
+  if(fr.skin && DATA.skin_faces && (fr.skin_op||0)>0.01){ skinMesh=mkSkin(fr.skin, fr.skin_op); sc.add(skinMesh); }
+  clearOrgans();   // solid organ surfaces during the anatomy reveal (toggle with the 'o' key)
+  if(showOrgans && fr.phase==='anatomy' && DATA.organ_surfaces){
+    for(const os of DATA.organ_surfaces){ const o=mkOrgan(os.V, os.F, os.color, 0.85); organMeshes.push(o); sc.add(o); }
+  }
+  document.getElementById('stage').textContent=fr.stage;
+  document.getElementById('slider').value=i;
+  pA.className=fr.phase==='cloud'?'on':''; pB.className=fr.phase==='handoff'?'on':''; pC.className=fr.phase==='mesh'?'on':''; pD.className=fr.phase==='anatomy'?'on':'';
+  document.getElementById('clkv').textContent=fr.t.toFixed(2)+'  ·  '+fr.phase;
+  document.getElementById('clkf').style.width=Math.round(fr.t*100)+'%';
+  renderPanel(fr.panel, fr.ptype);
+}
+const LAYER_Q={Clock:'when',Axes:'where',Heads:'what a cell becomes',Proportions:'the shape',
+  Skeleton:'bones',Muscle:'Hill muscle groups',Viscera:'homologous organs',Teeth:'added parts'};
+function renderPanel(rows, ptype){
+  if(ptype==='atlas'){ renderAtlas(rows); return; }
+  const line=r=>{
+    const tag=r.span?`<span class="tag both">both · ${r.firing}</span>`
+                     :`<span class="tag ${r.firing}">${r.firing}</span>`;
+    return `<div class="row ${r.span?'span':''}"><div class="nm">${r.name}${tag}</div>`+
+           `<div class="rl">${r.role}</div><div class="track"><div class="fill" style="width:${Math.round(r.mag*100)}%"></div></div></div>`;
+  };
+  const order=(DATA&&DATA.layers)||['Clock','Axes','Heads','Proportions'];
+  const by={}; for(const r of (rows||[])){ (by[r.layer]=by[r.layer]||[]).push(r); }
+  let html='';
+  for(const L of order){
+    html+=`<div class="sub">${L} <span class="q">— ${LAYER_Q[L]||''}</span></div>`;
+    const rs=(by[L]||[]).sort((a,b)=>(b.span-a.span)||(b.mag-a.mag));
+    html+= rs.length?rs.map(line).join(''):'<div class="rl" style="color:#5b6678">— quiet this frame —</div>';
+  }
+  document.getElementById('rows').innerHTML=html;
+}
+function renderAtlas(rows){
+  const line=r=>{
+    const tag=r.added?`<span class="tag both">added</span>`:`<span class="tag cloud">in situ</span>`;
+    return `<div class="row ${r.added?'span':''}"><div class="nm">${r.name}${tag}</div>`+
+           `<div class="rl">${r.role}</div><div class="track"><div class="fill" style="width:${Math.round(r.mag*100)}%"></div></div></div>`;
+  };
+  const order=(DATA&&DATA.atlas_layers)||['Skeleton','Muscle','Viscera','Teeth'];
+  const by={}; for(const r of (rows||[])){ (by[r.layer]=by[r.layer]||[]).push(r); }
+  let html='<div class="rl" style="color:#7dd3fc;margin-bottom:4px">Hill-organ atlas — one homologous roster, placed in situ (gold = ADDED, not in the roster)</div>';
+  for(const L of order){
+    if(!(by[L]&&by[L].length)) continue;
+    html+=`<div class="sub">${L} <span class="q">— ${LAYER_Q[L]||''}</span></div>`;
+    html+= by[L].map(line).join('');
+  }
+  document.getElementById('rows').innerHTML=html;
+}
+const pA=document.getElementById('pA'),pB=document.getElementById('pB'),pC=document.getElementById('pC'),pD=document.getElementById('pD');
+const KEY=[['Head','#4d75f2'],['Eye','#33d8ff'],['Heart','#ee2938'],['Limb','#47db76'],
+           ['Muscle','#db6b6b'],['Rib','#f0f0db'],['Spinal','#758de8'],['Jaw','#db9eb2'],
+           ['Gut','#d19a66'],['Skin','#f5d1bd']];
+const SRC=((params.get('src')==='mh')?'movie/human_movie_frames_mh.json':'movie/human_movie_frames.json')+'?v='+Date.now();
+const _bar=document.getElementById('loadbar'),_pct=document.getElementById('loadpct'),_wrap=document.getElementById('loadwrap');
+// streamed fetch so the loading bar tracks the download in real time (the JSON is several MB)
+fetch(SRC).then(resp=>{
+  const total=+resp.headers.get('Content-Length')||0; const reader=resp.body.getReader();
+  let got=0; const chunks=[];
+  const pump=()=>reader.read().then(({done,value})=>{
+    if(done) return;
+    chunks.push(value); got+=value.length;
+    if(total){const p=got/total; _bar.style.width=(p*90)+'%'; _pct.textContent=Math.round(p*100)+'%';}
+    else _pct.textContent=(got/1e6).toFixed(1)+' MB';
+    return pump();
+  });
+  return pump().then(()=>{
+    _pct.textContent='building…'; _bar.style.width='96%';
+    const buf=new Uint8Array(got); let o=0; for(const c of chunks){buf.set(c,o); o+=c.length;}
+    return JSON.parse(new TextDecoder().decode(buf));
+  });
+}).then(d=>{
+  _bar.style.width='100%'; if(_wrap) _wrap.style.display='none';
+  DATA=d; vmin=d.vmin; vmax=d.vmax; nf=d.frames.length;
+  if(d.display) document.querySelector('#ui b').textContent=d.display;
+  document.getElementById('slider').max=nf-1;
+  document.getElementById('key').innerHTML=KEY.map(k=>`<span><i class="dot" style="background:${k[1]}"></i>${k[0]}</span>`).join('');
+  const R=d.R||2.0; cam.position.set(R*0.42,R*0.10,R*3.4); ctrl.target.set(0,0,0);  // front-on; pulled back so a tall figure's head+feet are not cropped
+  cur=params.get('f')?Math.min(nf-1,Math.max(0,parseInt(params.get('f')))):0;
+  build(cur); syncPlay();
+});
+const playBtn=document.getElementById('play'),rotBtn=document.getElementById('rot'),
+      modeBtn=document.getElementById('mode'),slider=document.getElementById('slider');
+function syncPlay(){ playBtn.textContent=playing?'⏸ pause':'▶ play'; }
+playBtn.onclick=()=>{ if(graysMode||ncaMode)return; playing=!playing;syncPlay();};
+rotBtn.onclick=()=>{ctrl.autoRotate=!ctrl.autoRotate;rotBtn.classList.toggle('on',ctrl.autoRotate);};
+modeBtn.onclick=()=>{ if(graysMode||ncaMode)return;  mode=(mode==='anat')?'volt':'anat'; modeBtn.textContent=(mode==='anat')?'anatomy':'voltage';
+  modeBtn.classList.toggle('on',mode==='anat'); build(cur); };
+slider.oninput=()=>{ if(graysMode||ncaMode)return; playing=false;syncPlay();cur=parseInt(slider.value);build(cur);};
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();rn.setSize(innerWidth,innerHeight);});
+
+// ============================ EXTRA TABS + REVEAL TOGGLE ============================
+let graysMode=false, GDATA=null, gCtx=null, gSelMesh=null, gSelKey=null;
+let ncaMode=false, NDATA=null, ncaCtx=null, nSelMesh=null, nSelKey=null, nArchSel=null;
+let revealOn=false;
+function mkGrayCloud(flat,color,size,op){ const n=flat.length/3,P=new Float32Array(n*3);
+  for(let i=0;i<n;i++){P[3*i]=flat[3*i+2];P[3*i+1]=flat[3*i];P[3*i+2]=flat[3*i+1];}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(P,3));
+  return new THREE.Points(g,new THREE.PointsMaterial({color:new THREE.Color(color[0],color[1],color[2]),size:size,sizeAttenuation:true,transparent:true,opacity:op==null?1:op})); }
+function frameCam(c,r){ const cx=c[2],cy=c[0],cz=c[1]; ctrl.target.set(cx,cy,cz); cam.position.set(cx+r*0.3,cy+r*0.05,cz+r*3.2); }
+function scoreColor(s){ const t=Math.max(0,Math.min(1,(s-0.5)/0.5));
+  return `rgb(${Math.round(248-(248-74)*t)},${Math.round(113+(222-113)*t)},${Math.round(113+(128-113)*t)})`; }
+function rgbOf(c){ return `rgb(${Math.round(c[0]*255)},${Math.round(c[1]*255)},${Math.round(c[2]*255)})`; }
+// ---- Gray's ----
+function buildGrayContext(){ const all=[]; for(const p of GDATA.parts) for(const v of p.xyz) all.push(v);
+  gCtx=mkGrayCloud(all,[0.40,0.46,0.56],0.006,0.45); sc.add(gCtx); }
+function renderRoster(){
+  const q=((document.getElementById('gsearch')||{}).value||'').toLowerCase();
+  const byCat={}; for(const p of GDATA.parts){(byCat[p.cat]=byCat[p.cat]||[]).push(p);}
+  let html=`<h3>Gray's — every named part vs its checklist</h3><div id="gsum">${GDATA.n_parts} parts · mean ${GDATA.mean_score} · ${GDATA.fully_passing} fully pass · ${GDATA.n_plates} with plate</div><input id="gsearch" placeholder="filter parts…" value="${q}">`;
+  for(const cat of GDATA.cat_order){ let list=(byCat[cat]||[]).filter(p=>!q||p.key.toLowerCase().includes(q)); if(!list.length)continue;
+    const avg=GDATA.by_category[cat]; html+=`<div class="gcat">${cat} <span class="cs">${list.length} · ${avg==null?'':avg.toFixed(2)}</span></div>`;
+    list.sort((a,b)=>a.score-b.score||a.key.localeCompare(b.key));
+    for(const p of list){ const col=scoreColor(p.score);
+      html+=`<div class="gpart${p.key===gSelKey?' sel':''}" data-k="${encodeURIComponent(p.key)}"><span class="sd" style="background:${col}"></span><span class="gn">${p.name}${p.plate?' 🖼':''}</span><span class="gsc" style="color:${col}">${p.score.toFixed(2)}</span></div>`; } }
+  html+=`<div id="gdetail"></div>`; const gp=document.getElementById('graysPanel'); gp.innerHTML=html;
+  gp.querySelectorAll('.gpart').forEach(el=>el.onclick=()=>selectPart(decodeURIComponent(el.dataset.k)));
+  const se=document.getElementById('gsearch'); if(se){se.oninput=renderRoster; if(q){se.focus();se.setSelectionRange(q.length,q.length);}}
+  if(gSelKey){const p=GDATA.parts.find(x=>x.key===gSelKey); if(p) renderPartDetail(p);} }
+function renderPartDetail(p){ const dd=document.getElementById('gdetail'); if(!dd)return;
+  let h=`<div class="dt">${p.name} <span style="color:${scoreColor(p.score)}">${p.passed}/${p.nfeat}</span></div><div class="dm">${p.key} · ${p.ncells} cells · ${p.cat}</div>`;
+  for(const f of p.feats) h+=`<div class="ck ${f.ok?'pass':'fail'}"><span class="mk">${f.ok?'✓':'✗'}</span><span><span class="cf">${f.f}</span><br><span class="cd">${f.d}</span></span></div>`;
+  dd.innerHTML=h; const box=document.getElementById('gplateBox');
+  if(p.plate){box.style.display='block';box.innerHTML=`<img src="grays_plates/${p.plate}" alt="Gray's plate"><div class="cap">${p.plate_cap||''}</div>`;}else{box.style.display='none';box.innerHTML='';} }
+function selectPart(key){ gSelKey=key; const p=GDATA.parts.find(x=>x.key===key); if(!p)return;
+  if(gSelMesh){sc.remove(gSelMesh);gSelMesh.geometry.dispose();gSelMesh.material.dispose();}
+  gSelMesh=mkGrayCloud(p.xyz,GDATA.cat_color[p.cat]||[0.9,0.9,0.9],0.02,1.0); sc.add(gSelMesh);
+  let cx=0,cy=0,cz=0,n=p.xyz.length/3; for(let i=0;i<n;i++){cx+=p.xyz[3*i+2];cy+=p.xyz[3*i];cz+=p.xyz[3*i+1];}
+  ctrl.target.set(cx/n,cy/n,cz/n); renderRoster(); }
+function enterGrays(){ graysMode=true; playing=false; syncPlay(); document.getElementById('grays').classList.add('on');
+  document.getElementById('moviePanel').style.display='none'; document.getElementById('graysPanel').style.display='block';
+  for(const p of pts) p.visible=false; if(skinMesh) skinMesh.visible=false; for(const o of organMeshes) o.visible=false;
+  const go=()=>{ if(!gCtx) buildGrayContext(); else gCtx.visible=true; if(gSelMesh) gSelMesh.visible=true; frameCam(GDATA.center,GDATA.radius); renderRoster(); };
+  if(GDATA){go();} else {document.getElementById('graysPanel').innerHTML='<h3>Gray\'s</h3><div id="gsum">loading 294 parts…</div>';
+    fetch('movie/grays_parts.json?v='+Date.now()).then(r=>r.json()).then(d=>{GDATA=d;go();});} }
+function exitGrays(){ graysMode=false; document.getElementById('grays').classList.remove('on');
+  document.getElementById('graysPanel').style.display='none'; document.getElementById('moviePanel').style.display='block';
+  if(gCtx) gCtx.visible=false; if(gSelMesh) gSelMesh.visible=false;
+  const box=document.getElementById('gplateBox'); if(box){box.style.display='none';box.innerHTML='';} build(cur); }
+// ---- NCA+LLM ----
+function buildNcaContext(){ const all=[]; for(const h of NDATA.heads) for(const v of h.xyz) all.push(v);
+  ncaCtx=mkGrayCloud(all,[0.40,0.46,0.56],0.006,0.40); sc.add(ncaCtx); }
+function vgrid(obj){ let h='<div class="vgrid">'; for(const k in obj){const v=obj[k];
+  h+=`<span class="vk">${k}</span><span class="vv">${(v&&typeof v==='object')?JSON.stringify(v):(v==null?'—':v)}</span>`;} return h+'</div>'; }
+function knobHtml(k){ return `<div class="knob"><span class="kg">${k.gene}</span> → ${k.trait||k.knob} ${k.beta!=null?`<span class="kb">β=${k.beta} ${k.unit||''}</span>`:''}<div class="kd">${k.snp||''} ${k.direction||''} · ${k.source||''}</div></div>`; }
+function renderHeadRoster(){ const q=((document.getElementById('nsearch')||{}).value||'').toLowerCase();
+  let html=`<h3>NCA + LLM — the model internals</h3><div id="gsum">${NDATA.n_heads} heads · ${NDATA.n_knobs} adapter knobs · click a layer or a head</div><div id="narch">`;
+  NDATA.architecture.forEach((L,i)=>{html+=`<span class="achip${i===nArchSel?' sel':''}" data-i="${i}">${L.layer}</span>`;});
+  html+=`</div><input id="nsearch" placeholder="filter heads / TF…" value="${q}">`;
+  const byKind={}; for(const h of NDATA.heads){(byKind[h.kind]=byKind[h.kind]||[]).push(h);}
+  for(const kind of NDATA.kind_order){ let list=(byKind[kind]||[]).filter(h=>!q||h.name.toLowerCase().includes(q)||(h.master_tf||'').toLowerCase().includes(q)); if(!list.length)continue;
+    const c=rgbOf(NDATA.kind_color[kind]); html+=`<div class="gcat">${kind} <span class="cs">${list.length}</span></div>`;
+    for(const h of list){ html+=`<div class="gpart${h.name===nSelKey?' sel':''}" data-k="${encodeURIComponent(h.name)}"><span class="sd" style="background:${c}"></span><span class="gn">${h.name}<span class="tf">${h.master_tf&&h.master_tf!=='-'?' · '+h.master_tf:''}</span></span><span class="gsc" style="color:#7f8ca3">${h.n_cells}</span></div>`; } }
+  html+=`<div id="ndetail"></div>`; const np=document.getElementById('ncaPanel'); np.innerHTML=html;
+  np.querySelectorAll('.achip').forEach(el=>el.onclick=()=>selectArch(+el.dataset.i));
+  np.querySelectorAll('.gpart').forEach(el=>el.onclick=()=>selectHead(decodeURIComponent(el.dataset.k)));
+  const se=document.getElementById('nsearch'); if(se){se.oninput=renderHeadRoster; if(q){se.focus();se.setSelectionRange(q.length,q.length);}}
+  if(nSelKey){const h=NDATA.heads.find(x=>x.name===nSelKey); if(h) renderHeadDetail(h);} else if(nArchSel!=null) renderArchDetail(NDATA.architecture[nArchSel]); }
+function renderArchDetail(L){ const dd=document.getElementById('ndetail'); if(!dd)return;
+  let h=`<div class="dt">${L.layer}</div><div class="dm">${L.role}</div><div style="font-size:11px;color:#aeb9c9;margin-bottom:5px">${L.detail}</div><div class="vsub">values</div>`+vgrid(L.values);
+  if(L.layer.indexOf('MLP')>=0||L.layer.indexOf('LGM')>=0){h+=`<div class="vsub">LGM adapter — GWAS knobs (real β)</div>`; for(const k of NDATA.adapter_knobs) h+=knobHtml(k);} dd.innerHTML=h; }
+function renderHeadDetail(h){ const dd=document.getElementById('ndetail'); if(!dd)return;
+  let html=`<div class="dt">${h.name} <span style="font-size:10px;color:#8091a8">${h.kind}${h.parent?' ◂ '+h.parent:''}</span></div><div class="dm">master TF ${h.master_tf} · AlphaGenome: ${h.ag_tissue||'—'} · ${h.n_cells} cells${h.implemented?'':' · (not yet in build)'}</div><div class="vsub">inner-NCA parameters (actual values)</div>`+
+    vgrid({'Vm set-point (mV)':h.vm_setpoint_mV,'cadherin ADH':h.adhesion,'integrin ECM':h.ecm,'PRC2 unlock':h.prc2_unlock,'prolif weight':h.prolif_weight,'organ target (frac)':h.org_target,'paired':h.paired})+
+    `<div class="vsub">electric-frame address (measured centroid)</div>`+vgrid({'AP':h.ap,'DV':h.dv,'LR (ML)':h.lr});
+  if(h.knobs&&h.knobs.length){html+=`<div class="vsub">LGM adapter knobs on this head</div>`; for(const k of h.knobs) html+=knobHtml(k);} dd.innerHTML=html; }
+function selectArch(i){ nArchSel=i; nSelKey=null; if(nSelMesh){sc.remove(nSelMesh);nSelMesh.geometry.dispose();nSelMesh.material.dispose();nSelMesh=null;} renderHeadRoster(); }
+function selectHead(name){ nSelKey=name; nArchSel=null; const h=NDATA.heads.find(x=>x.name===name); if(!h)return;
+  if(nSelMesh){sc.remove(nSelMesh);nSelMesh.geometry.dispose();nSelMesh.material.dispose();}
+  nSelMesh=mkGrayCloud(h.xyz,NDATA.kind_color[h.kind]||[0.9,0.9,0.9],0.02,1.0); sc.add(nSelMesh);
+  let cx=0,cy=0,cz=0,n=h.xyz.length/3; for(let i=0;i<n;i++){cx+=h.xyz[3*i+2];cy+=h.xyz[3*i];cz+=h.xyz[3*i+1];}
+  ctrl.target.set(cx/n,cy/n,cz/n); renderHeadRoster(); }
+function enterNca(){ ncaMode=true; playing=false; syncPlay(); document.getElementById('nca').classList.add('on');
+  document.getElementById('moviePanel').style.display='none'; document.getElementById('ncaPanel').style.display='block';
+  for(const p of pts) p.visible=false; if(skinMesh) skinMesh.visible=false; for(const o of organMeshes) o.visible=false;
+  const go=()=>{ if(!ncaCtx) buildNcaContext(); else ncaCtx.visible=true; if(nSelMesh) nSelMesh.visible=true; frameCam(NDATA.center,NDATA.radius); renderHeadRoster(); };
+  if(NDATA){go();} else {document.getElementById('ncaPanel').innerHTML='<h3>NCA+LLM</h3><div id="gsum">loading model internals…</div>';
+    fetch('movie/nca_llm.json?v='+Date.now()).then(r=>r.json()).then(d=>{NDATA=d;go();});} }
+function exitNca(){ ncaMode=false; document.getElementById('nca').classList.remove('on');
+  document.getElementById('ncaPanel').style.display='none'; document.getElementById('moviePanel').style.display='block';
+  if(ncaCtx) ncaCtx.visible=false; if(nSelMesh) nSelMesh.visible=false; build(cur); }
+// ---- reveal toggle: jump between the adult skin (last mesh frame) and the anatomy reveal (last frame) ----
+function _lastPhase(ph){ let idx=0; for(let i=0;i<DATA.frames.length;i++){ if(DATA.frames[i].phase===ph) idx=i; } return idx; }
+function toggleReveal(){ if(!DATA) return; if(graysMode)exitGrays(); if(ncaMode)exitNca(); revealOn=!revealOn; playing=false; syncPlay();
+  document.getElementById('reveal').classList.toggle('on',revealOn);
+  cur=revealOn?_lastPhase('anatomy'):_lastPhase('mesh'); build(cur); }
+document.getElementById('grays').onclick=()=>{ if(ncaMode)exitNca(); graysMode?exitGrays():enterGrays(); };
+document.getElementById('nca').onclick=()=>{ if(graysMode)exitGrays(); ncaMode?exitNca():enterNca(); };
+document.getElementById('reveal').onclick=toggleReveal;
+// ============================ end extra tabs ============================
+
+function loop(t){ requestAnimationFrame(loop);
+  if(DATA&&!graysMode&&!ncaMode&&playing&&t-last>FRAME_MS){last=t;cur=(cur+1)%nf;build(cur);}
+  ctrl.update(); rn.render(sc,cam); }
+requestAnimationFrame(loop);
+</script></body></html>

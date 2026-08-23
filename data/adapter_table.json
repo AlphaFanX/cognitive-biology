@@ -1,0 +1,163 @@
+{
+ "face.chin": {
+  "gene": "EDAR",
+  "snp": "rs3827760",
+  "trait": "chin protrusion",
+  "direction": "+z chin",
+  "source": "xiong",
+  "beta": 0.0991,
+  "unit": "C-GWAS std",
+  "effect_allele": "A",
+  "provenance": "Xiong 2025 C-GWAS (Zenodo 13730680)",
+  "note": "canonical EDAR lead; Xiong beta from EDAR-region proxy rs11676729"
+ },
+ "face.nasion": {
+  "gene": "PAX3",
+  "snp": "rs7559271",
+  "trait": "nasion depth",
+  "direction": "+z nasion",
+  "source": "xiong",
+  "beta": -0.1017,
+  "unit": "C-GWAS std",
+  "effect_allele": "G",
+  "provenance": "Xiong 2025 C-GWAS (Zenodo 13730680)"
+ },
+ "face.nasal_tip": {
+  "gene": "DCHS2",
+  "snp": "rs2045323",
+  "trait": "nasal tip",
+  "direction": "+y/z tip",
+  "source": "xiong",
+  "beta": 0.115,
+  "unit": "C-GWAS std",
+  "effect_allele": "A",
+  "provenance": "Xiong 2025 C-GWAS (Zenodo 13730680)",
+  "note": "L2G assigns neighbouring SFRP2 (causal-gene ambiguity); Adhikari 2016 = DCHS2"
+ },
+ "face.nasal_bridge": {
+  "gene": "RUNX2",
+  "snp": "rs227833",
+  "trait": "bridge breadth",
+  "direction": "+/-x bridge",
+  "source": "xiong",
+  "beta": 0.09817,
+  "unit": "C-GWAS std",
+  "effect_allele": "C",
+  "provenance": "Xiong 2025 C-GWAS (Zenodo 13730680)",
+  "note": "RUNX2/SUPT3H locus; rs227833 = SUPT3H (causal gene debated)"
+ },
+ "face.alae": {
+  "gene": "GLI3",
+  "snp": "rs17640804",
+  "trait": "alar breadth",
+  "direction": "+/-x alae",
+  "source": "xiong",
+  "beta": -0.02308,
+  "unit": "C-GWAS std",
+  "effect_allele": "T",
+  "provenance": "Xiong 2025 C-GWAS (Zenodo 13730680)",
+  "note": "corrected lead (L2G->GLI3 0.86); beta pending re-extraction with this SNP"
+ },
+ "face.alae2": {
+  "gene": "PAX1",
+  "snp": "rs6047635",
+  "trait": "alar breadth",
+  "direction": "+/-x alae",
+  "source": "xiong",
+  "beta": -0.0219,
+  "unit": "C-GWAS std",
+  "effect_allele": "G",
+  "provenance": "Xiong 2025 C-GWAS (Zenodo 13730680)",
+  "note": "corrected lead (L2G->PAX1); beta pending re-extraction"
+ },
+ "face.nose_width": {
+  "gene": "GLI3",
+  "snp": "rs17640804",
+  "trait": "alare-alare nose width (lm 26-27)",
+  "direction": "alar widening",
+  "source": "xiong_distance",
+  "beta": -0.0231,
+  "unit": "C-GWAS std",
+  "width_betas": {
+   "GLI3": -0.0231,
+   "DCHS2": -0.0248,
+   "RUNX2": 0.0191,
+   "PAX1": 0.0052
+  },
+  "provenance": "Xiong C-GWAS alare-alare distance 26_27 (nose_width_betas.json)",
+  "note": "distance-specific; co-acting RUNX2 +0.019, DCHS2 -0.025, PAX1 +0.005 (all tiny -> polygenic)"
+ },
+ "heart.la_volume": {
+  "gene": "PITX2",
+  "snp": "rs2129977",
+  "trait": "left-atrial volume",
+  "direction": "D-loop laterality knob",
+  "source": "literature",
+  "beta": 0.057,
+  "unit": "SD/allele",
+  "provenance": "published effect size (Paper #7 refs)"
+ },
+ "heart.lv_cavity": {
+  "gene": "TTN",
+  "snp": "rs2042995",
+  "trait": "LV end-diastolic volume",
+  "direction": "tube-length knob",
+  "source": "literature",
+  "beta": 0.06,
+  "unit": "SD/allele",
+  "provenance": "published effect size (Paper #7 refs)"
+ },
+ "heart.wall": {
+  "gene": "TBX5",
+  "snp": null,
+  "trait": "chamber wall",
+  "direction": "wall knob",
+  "source": "developmental",
+  "beta": null,
+  "unit": null,
+  "provenance": "developmental anchor (no morphology GWAS)",
+  "note": "developmental anchor; no morphology association"
+ },
+ "eye.axial_length": {
+  "gene": "RSPO1",
+  "snp": "rs2777044",
+  "trait": "ocular axial length",
+  "direction": "eye-field scale",
+  "source": "literature",
+  "beta": 0.073,
+  "unit": "mm/allele",
+  "provenance": "published effect size (Paper #7 refs)"
+ },
+ "kidney.cortex": {
+  "gene": "MYCN",
+  "snp": "rs2168101",
+  "trait": "kidney cortex volume",
+  "direction": "ureteric-branching knob",
+  "source": "literature",
+  "beta": 0.06,
+  "unit": "SD/allele",
+  "provenance": "published effect size (Paper #7 refs)"
+ },
+ "body.height": {
+  "gene": "(polygenic ~12k loci)",
+  "snp": null,
+  "trait": "standing height",
+  "direction": "overall maturation size",
+  "source": "polygenic",
+  "beta": null,
+  "unit": "PGS",
+  "provenance": "Yengo 2022; represent by a PGS, not one allele",
+  "note": "Yengo 2022; represent by a PGS, not one allele"
+ },
+ "body.proportion": {
+  "gene": "(polygenic)",
+  "snp": null,
+  "trait": "sitting-height ratio",
+  "direction": "limb:trunk (embryonic)",
+  "source": "polygenic",
+  "beta": null,
+  "unit": "PGS",
+  "provenance": "represent by a PGS",
+  "note": "represent by a PGS"
+ }
+}

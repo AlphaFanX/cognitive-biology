@@ -19,6 +19,21 @@ these datasets; only the genome-conditioned modules require them.
 | **FaceBase mean-face mesh** (`meanface.npz`: 43,071-vertex surface + landmarks) | `face_demo/*.py`, `medic/nca_abc_modes.py`, `medic/organ_modes.py` | FaceBase (`Meanshape.mat`) → `face_demo/data/meanface.npz` (override path with `$FACEBASE_MEANFACE`) |
 | **Additional GEO tracks** | kernel construction | GEO **GSE115541** |
 
+Redistributed here (small, permissively licensed):
+- `data/grays_plates/` — 20 plates from the 1918 US edition of *Gray's
+  Anatomy* (public domain), fetched from Wikimedia Commons by
+  `medic/grays_tab_export.py` for the viewer's Gray's tab.
+- `data/bodybase/makehuman_decimated.npz` — a decimated MakeHuman base mesh
+  (MakeHuman assets are CC0), used by the movie's handoff/maturation phases.
+- `data/movie/grays_parts.json`, `data/movie/nca_llm.json` — the viewer's tab
+  datasets (regenerable from the exports).
+- `data/adapter_table.json`, `data/organ_cascade/*_search.json`,
+  `mouse_to_human_builder.json` — fitted knob values consumed by
+  `medic/human_movie.py`; committed so the movie regenerates from a clone.
+- The movie frames themselves (`data/movie/human_movie_frames*.json`, ~58 MB)
+  are generated artifacts and are **not** committed — rebuild with
+  `python -m medic.human_movie`.
+
 Notes:
 - The bioelectric voltage constants used by the zebrafish/Xenopus modules
   (`zebrafish_bioelectric.py`, `xenopus_bioelectric.py`) are encoded directly

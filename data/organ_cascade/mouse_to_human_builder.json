@@ -1,0 +1,162 @@
+{
+ "reference_mouse_embryo": {
+  "elongation": 1.21,
+  "flatness": 1.45,
+  "bend": 0.05,
+  "tortuosity": 1.2,
+  "hollowness": 0.12
+ },
+ "human_embryo": {
+  "elongation": 2.159,
+  "flatness": 1.086,
+  "bend": 1.737,
+  "tortuosity": 1.317,
+  "hollowness": 0.152
+ },
+ "human_adult": {
+  "elongation": 2.059,
+  "flatness": 3.213,
+  "bend": 0.034,
+  "tortuosity": 1.727,
+  "hollowness": 0.152
+ },
+ "species_adapter": {
+  "match": 0.841,
+  "move": [
+   {
+    "gene": "CDX2/HOX",
+    "param": "L",
+    "frm": 3.003,
+    "to": 1.2,
+    "move": -1.803
+   },
+   {
+    "gene": "WNT-PCP",
+    "param": "w_ml",
+    "frm": 1.037,
+    "to": 1.1,
+    "move": 0.063
+   },
+   {
+    "gene": "BMP/FOXA2",
+    "param": "w_dv",
+    "frm": 0.949,
+    "to": 0.544,
+    "move": -0.405
+   },
+   {
+    "gene": "SHH/noto",
+    "param": "kappa",
+    "frm": 1.961,
+    "to": 0.811,
+    "move": -1.15
+   },
+   {
+    "gene": "OTX2/SIX3",
+    "param": "head",
+    "frm": 2.185,
+    "to": 1.837,
+    "move": -0.348
+   },
+   {
+    "gene": "TBX5/FGF10",
+    "param": "limb",
+    "frm": 0.156,
+    "to": 0.04,
+    "move": -0.116
+   },
+   {
+    "gene": "CDX/tail",
+    "param": "taper",
+    "frm": 0.765,
+    "to": 0.63,
+    "move": -0.135
+   }
+  ],
+  "final": {
+   "elongation": 1.77,
+   "flatness": 1.21,
+   "bend": 1.3,
+   "tortuosity": 1.12,
+   "hollowness": 0.17
+  },
+  "percent_off": {
+   "elongation": 18.0,
+   "flatness": 11.4,
+   "bend": 25.2,
+   "tortuosity": 15.0,
+   "hollowness": 11.8
+  },
+  "mean_percent_off": 16.3
+ },
+ "maturation": {
+  "match": 0.822,
+  "move": [
+   {
+    "gene": "CDX2/HOX",
+    "param": "L",
+    "frm": 1.2,
+    "to": 2.097,
+    "move": 0.897
+   },
+   {
+    "gene": "WNT-PCP",
+    "param": "w_ml",
+    "frm": 1.1,
+    "to": 0.3,
+    "move": -0.8
+   },
+   {
+    "gene": "BMP/FOXA2",
+    "param": "w_dv",
+    "frm": 0.544,
+    "to": 0.648,
+    "move": 0.104
+   },
+   {
+    "gene": "SHH/noto",
+    "param": "kappa",
+    "frm": 0.811,
+    "to": 0.0,
+    "move": -0.811
+   },
+   {
+    "gene": "OTX2/SIX3",
+    "param": "head",
+    "frm": 1.837,
+    "to": 1.339,
+    "move": -0.498
+   },
+   {
+    "gene": "TBX5/FGF10",
+    "param": "limb",
+    "frm": 0.04,
+    "to": 0.01,
+    "move": -0.03
+   },
+   {
+    "gene": "CDX/tail",
+    "param": "taper",
+    "frm": 0.63,
+    "to": 0.9,
+    "move": 0.27
+   }
+  ],
+  "final": {
+   "elongation": 1.99,
+   "flatness": 2.14,
+   "bend": 0.03,
+   "tortuosity": 1.14,
+   "hollowness": 0.15
+  },
+  "percent_off": {
+   "elongation": 3.4,
+   "flatness": 33.4,
+   "bend": 11.8,
+   "tortuosity": 34.0,
+   "hollowness": 1.3
+  },
+  "mean_percent_off": 16.8
+ },
+ "note": "species adapter is STAGE-MATCHED (mouse embryo -> human embryo, HESTA); maturation (human embryo -> adult) is the separate layer carrying the straighten/flatten/limb change"
+}

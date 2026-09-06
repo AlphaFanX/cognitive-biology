@@ -126,16 +126,29 @@ def run():
     except Exception:
         pass
 
+    # DISCRIMINATORS ON THE FATE SIDE TOO (cycle 82g): the fate stop-list drops side, ordinal and
+    # proximal/middle/distal, so one sided, ordinal fate ("Proximal Phalanx of Left Third Toe") would
+    # code every toe phalanx in the tree. A fate that CARRIES such words may only match a node that
+    # carries all of them.
+    _DISC = {"left", "right", "proximal", "middle", "distal"} | set(_ORD[:5])
+    _raw = lambda s: set("".join(c if c.isalnum() else " " for c in str(s).lower()).split())
+    fate_disc = {f: (_raw(f) & _DISC) for f in FIDX}
+
     def code_match(node_name):
         """-> (matched name, cells-at-term-or-None) | (None, None). Fates first (census carries
         their cells), then the built parts (their own cell counts)."""
         nt = _toks(node_name)
         if not nt:
             return None, None
+        nraw = _raw(node_name)
         best, bj = None, 0.0
         for f, ft in fate_toks.items():
             if not ft:
                 continue
+            if fate_disc[f] and fate_disc[f] != (nraw & _DISC):
+                continue                      # a discriminated fate matches only its own side/ordinal/level
+                # (subset was not enough: "Middle Phalanx of Right Middle Finger" -- 'middle' twice --
+                #  passed for "distal phalanx of right middle finger" and won the tie by FIDX order)
             j = len(nt & ft) / len(nt | ft)
             if j > bj:
                 best, bj = f, j
@@ -221,9 +234,11 @@ def write_adult_census():
     """Dump the SCORED-body fate census (build_base, subhead-sorted -- the true cells-at-term
     object) to data/organ_cascade/adult_census.json."""
     import numpy as np
-    from medic.adult_persistence_audit import build_base
+    from medic.integrated_body import assemble, mature_parts
     from medic.unified_embryo import FATES
-    base, F = build_base()
+    # THE MATURED SCORED BODY (cycle 82g): cells-at-term = the body tier A scores = mature_parts, where
+    # the autopod landing names the 76 hand/foot bones (build_base alone carries no autopod names).
+    F = np.asarray(mature_parts(assemble())["F"])
     names_, counts_ = np.unique(np.asarray(F), return_counts=True)
     out = {FATES[int(i)] if 0 <= int(i) < len(FATES) else str(i): int(c)
            for i, c in zip(names_, counts_)}

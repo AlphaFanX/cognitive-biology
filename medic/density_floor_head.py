@@ -34,10 +34,12 @@ FLOOR_FATES = [
 ]
 
 
-def apply(base, F, floor=FLOOR, verbose=True):
-    """Top up each allowlisted fate to `floor` cells by jittered cloning. Returns (base, F, report)."""
+def apply(base, F, floor=FLOOR, verbose=True, names=None):
+    """Top up each allowlisted fate to `floor` cells by jittered cloning. Returns (base, F, report).
+    `names` overrides the allowlist (cycle 82g: the 76 autopod bones named at maturation take a floor of
+    their own on the matured body -- the ledger's 'completed' reads >= 20 cells at term)."""
     adds_P, adds_F, report = [], [], {}
-    for name in FLOOR_FATES:
+    for name in (FLOOR_FATES if names is None else names):
         fid = FIDX.get(name)
         if fid is None:
             continue

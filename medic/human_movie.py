@@ -1601,7 +1601,13 @@ def standing_register(Q, fate, f=1.0):
     return Q
 
 
-def populate_autopods(Q, fate, frac=1.0):
+_DIGIT_NAMES = {"hand": ("Thumb", "Index Finger", "Middle Finger", "Ring Finger", "Little Finger"),
+                "foot": ("Great Toe", "Second Toe", "Third Toe", "Fourth Toe", "Little Toe")}
+_META_NAME = {"hand": "Metacarpal", "foot": "Metatarsal"}
+_ORDINAL = ("First", "Second", "Third", "Fourth", "Fifth")
+
+
+def populate_autopods(Q, fate, frac=1.0, labels_out=None):
     """THE AUTOPODS GET CELLS (Miles, frame 91: 'the hands are empty, no cells in them'). The
     hand/foot volumes were MESH-ONLY -- shells densified into the skin field -- so when the
     anatomy reveal dissolved the skin there were no cells to reveal: empty gloves. The autopod
@@ -1622,9 +1628,9 @@ def populate_autopods(Q, fate, frac=1.0):
     apf = (x - x.min()) / H
     mid = float(np.median(z))
     limbm = np.asarray(fate) == LIMB
-    for shell, m_band, FLOOR in (
-            (hv, limbm & (apf >= 0.45), 320),               # arms -> hands
-            (fv, limbm & (apf < 0.30), 420)):               # legs -> feet
+    for shell, m_band, FLOOR, kind in (
+            (hv, limbm & (apf >= 0.45), 320, "hand"),       # arms -> hands
+            (fv, limbm & (apf < 0.30), 420, "foot")):       # legs -> feet
         shell = np.asarray(shell, float)
         if len(shell) < 12 or m_band.sum() < 30:
             continue
@@ -1677,6 +1683,18 @@ def populate_autopods(Q, fate, frac=1.0):
             o = np.argsort(prox)
             n_palm = max(4, int(0.25 * len(take)))
             palm_c, digit_c = take[o[:n_palm]], take[o[n_palm:]]
+            side_nm = "Left" if sgn < 0 else "Right"          # model z: -1 left, +1 right (laterality)
+            dorder = np.argsort(cen @ fan_ax)                  # digit index at each fan position
+            # THE AUTOPOD NAMES (cycle 82g): the landing knows every cell's bone -- palm/sole cells take
+            # the metacarpal / metatarsal at their fan position, digit cells the phalanx of their ring
+            # (digit 1 has no middle phalanx) -- so the scored body's fates can carry the 76 named
+            # bones the FMA ledger counts (subhead_program's deferred autopod roster).
+            if labels_out is not None and len(palm_c) >= _ND:
+                pgs = np.array_split(np.argsort(Q[palm_c] @ fan_ax), _ND)
+                for g, d in zip(pgs, dorder):
+                    fidn = FIDX.get(f"{side_nm} {_ORDINAL[d]} {_META_NAME[kind]} Bone")
+                    if fidn is not None and len(g):
+                        labels_out[palm_c[g]] = fidn
             pv = palm[np.argsort(palm @ out_ax)]
             tgtp = pv[np.linspace(0, len(pv) - 1, len(palm_c)).astype(int)]
             kk = np.arange(len(palm_c))
@@ -1684,7 +1702,6 @@ def populate_autopods(Q, fate, frac=1.0):
             Q[palm_c] = Q[palm_c] + frac * ((tgtp + offp) - Q[palm_c])
             if len(digit_c) >= 2 * _ND:
                 cgs = np.array_split(np.argsort(Q[digit_c] @ fan_ax), _ND)
-                dorder = np.argsort(cen @ fan_ax)
                 for g, d in zip(cgs, dorder):
                     if len(g) < 1:
                         continue
@@ -1692,10 +1709,20 @@ def populate_autopods(Q, fate, frac=1.0):
                     ax = axes[d] / (np.linalg.norm(axes[d]) + 1e-12)
                     ci = ci[np.argsort(Q[ci] @ ax)]                       # proximal -> distal along this digit
                     vv = dig[d]                                           # ring-major: proximal -> distal
-                    tgt = vv[np.linspace(0, len(vv) - 1, len(ci)).astype(int)]
+                    vi = np.linspace(0, len(vv) - 1, len(ci)).astype(int)
+                    tgt = vv[vi]
                     k = np.arange(len(ci))
                     off = np.stack([np.sin(k * 2.4), np.cos(k * 1.7), np.sin(k * 3.1)], 1) * jit
                     Q[ci] = Q[ci] + frac * ((tgt + off) - Q[ci])
+                    if labels_out is not None:
+                        ring = vi // _NS                                  # 0 proximal .. 2 distal
+                        phal = (np.where(ring <= 1, "Proximal", "Distal") if d == 0
+                                else np.array(("Proximal", "Middle", "Distal"))[ring])
+                        dig_nm = _DIGIT_NAMES[kind][d]
+                        for ph in np.unique(phal):
+                            fidn = FIDX.get(f"{ph} Phalanx of {side_nm} {dig_nm}")
+                            if fidn is not None:
+                                labels_out[ci[phal == ph]] = fidn
     return Q, hv, hf, fv, ff
 
 

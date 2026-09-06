@@ -99,6 +99,28 @@ SPECS = [
         ("Sigmoid Colon",    0.90, 0.97, "Hoxd12"),
         ("Rectum",           0.97, 1.00, "Hoxa13/Hoxd13"),
     ]),
+    # THE AUTOPOD ROSTER (cycle 82g): the 76 named hand and foot bones, FMA style, so the ledger's hand
+    # (0/105) and foot (6/119) roots can be COUNTED. family "deferred": the names are REGISTERED here
+    # (they inherit Limb Bud's adhesion / ECM / voltage / clock / packing group like every child) but
+    # NOT relabelled in build_base -- autopod cells only reach their bones at maturation, where
+    # populate_autopods' digit-labelled landing knows each cell's digit and ring (labels_out) and
+    # writes them into the scored body's fates (integrated_body.mature_parts). Master genes: digit 1
+    # (thumb / great toe) = the Gli3R-high, Shh-low pole (Hoxd13), digits 2-5 = the Shh / Hoxd12-13
+    # gradient; phalanges = Gdf5 interzones + Ihh growth plates; metacarpals/metatarsals = Hoxa13.
+    dict(parent="Limb Bud", family="deferred", children=[
+        (f"{ph} Phalanx of {side} {dig}", 0.0, 0.0,
+         ("Hoxd13/Gli3R" if k == 0 else "Shh/Hoxd12-13") + "; Gdf5/Ihh")
+        for side in ("Left", "Right")
+        for digits in (("Thumb", "Index Finger", "Middle Finger", "Ring Finger", "Little Finger"),
+                       ("Great Toe", "Second Toe", "Third Toe", "Fourth Toe", "Little Toe"))
+        for k, dig in enumerate(digits)
+        for ph in (("Proximal", "Distal") if k == 0 else ("Proximal", "Middle", "Distal"))
+    ] + [
+        (f"{side} {ordn} {meta} Bone", 0.0, 0.0, ("Hoxd13/Gli3R" if k == 0 else "Shh/Hoxd12-13") + "; Hoxa13")
+        for side in ("Left", "Right")
+        for meta in ("Metacarpal", "Metatarsal")
+        for k, ordn in enumerate(("First", "Second", "Third", "Fourth", "Fifth"))
+    ]),
     # Lung: a BRANCHING TREE -> the five lobes (right superior/middle/inferior, left superior/inferior).
     # The relabel clusters the lung on its own branch modes; the primary order axis is medio-lateral so the
     # two lungs group, then cranio-caudal within each. (Which cluster maps to which lobe is best-effort.)
@@ -177,6 +199,8 @@ def apply(base, F, FIDX):
     from medic.suborgan_attractor import gj_laplacian, fiedler
     F = F.copy()
     for sp in SPECS:
+        if sp.get("family") == "deferred":
+            continue                                           # registered names; labelled at maturation
         pid = FIDX.get(sp["parent"])
         if pid is None:
             continue

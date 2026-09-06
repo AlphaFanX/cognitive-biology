@@ -368,7 +368,18 @@ def mature_parts(R):
     # called it -- the scored specimen shipped nearly FOOTLESS (three instruments convicted it:
     # sections share 0.03x, gods-panel foot length 0.000, the frame-91 empty-gloves lesson).
     from medic.human_movie import populate_autopods as _autopods
-    A = _autopods(A, F, frac=1.0)[0]
+    # THE AUTOPOD NAMES (cycle 82g): the landing writes each autopod cell's bone (76 FMA-named
+    # phalanges / metacarpals / metatarsals, the deferred roster) into the scored body's fates.
+    F_named = np.asarray(F).copy()
+    A = _autopods(A, F, frac=1.0, labels_out=F_named)[0]
+    # the bone floor (the density_floor_head idiom, declared instrument limit): each named autopod bone
+    # lands 12-24 cells from the limb's distal pool; top each up to 24 by jittered in-place cloning so
+    # the ledger's completed rule (>= 20 cells at term) reads presence, not the landing's split.
+    from medic.density_floor_head import apply as _bone_floor
+    from medic.subhead_program import children_of as _children_of
+    A, F_named, _ = _bone_floor(A, F_named, floor=24, verbose=False, names=_children_of("Limb Bud"))
+    if len(A) > len(F):                                # the clones are Limb Bud in the unnamed fate array too
+        F = np.concatenate([np.asarray(F), np.full(len(A) - len(F), LIMB, dtype=np.asarray(F).dtype)])
     disp = A_field - base
     tree = cKDTree(base)
 
@@ -424,7 +435,7 @@ def mature_parts(R):
         s0 = _sp(P)
         return (_sp(warp(P)) / s0) if s0 > 1e-9 else None
 
-    M = {"base": A, "F": F}
+    M = {"base": A, "F": F_named}                     # the matured body carries the autopod bone names
     M["vertebrae"] = {**R["vertebrae"], "P": rigid_by(R["vertebrae"]["P"], R["vertebrae"]["name"])}
     M["limb_bones"] = {k: {**r, "P": rigid_by(r["P"], r["bone"], s_fix=_limb_scale(r["P"]))}
                        for k, r in R["limb_bones"].items()}

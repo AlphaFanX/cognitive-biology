@@ -86,6 +86,14 @@ def _span(P):
     return float(np.ptp(C @ np.linalg.svd(C, full_matrices=False)[2][0]))
 
 
+def _stature(R):
+    """Standing height of the scored specimen = the base cloud's longest principal extent (crown->sole on
+    the matured standing body). Cached on R -- the organ checks that need a size fraction share one measure."""
+    if "_stature" not in R:
+        R["_stature"] = _span(np.asarray(R["base"], float))
+    return R["_stature"]
+
+
 # ----------------------------------------------------------------- SPECIFIC Gray's checklists
 def check_skull(parts):
     """Gray's skull: a rounded braincase of several named bones, bilateral pairs, a separate mandible, orbits."""
@@ -97,8 +105,11 @@ def check_skull(parts):
     feats.append(dict(feature=">=6 non-degenerate named bones", passed=len(solid) >= 6,
                       detail=f"{len(solid)} solid of {len(counts)}; degenerate: "
                              f"{[k for k, n in counts.items() if n < 20]}"))
-    # (2) braincase roundedness (vault = frontal+occipital+parietal)
-    vault = np.vstack([named[k]["P"] for k in named if any(s in k for s in ("frontal", "occipital", "parietal"))]
+    # (2) braincase roundedness (vault = the full NEUROCRANIUM: frontal+parietal+temporal+occipital -- the
+    # temporal squama IS a vault bone; excluding it made this a top-heavy bowl that rewarded a small
+    # non-enclosing cap over a vault that actually contains the brain, 2026-08-29 fix)
+    vault = np.vstack([named[k]["P"] for k in named
+                       if any(s in k for s in ("frontal", "occipital", "parietal", "temporal"))]
                       or [np.zeros((1, 3))])
     sph = sphericity(vault) if len(vault) > 6 else 0.0
     feats.append(dict(feature="braincase rounded (sphericity>=0.45)", passed=sph >= 0.45, detail=f"sphericity {sph:.2f}"))
@@ -168,6 +179,26 @@ def check_generic(P, paired=False):
 
 
 # ----------------------------------------------------------------- SPECIFIC Gray's organ checklists
+def local_anisotropy(P, k=12, nsamp=800, seed=7):
+    """Median local PCA elongation (l1/l2) over kNN neighbourhoods -- tube-ness that survives coiling:
+    a coiled tube is locally 1D everywhere while globally compact; a blob is locally isotropic.
+    Calibration (2026-09-05, matured specimen): reference gut 1.55, model gut 1.42, gaussian blob 1.29-1.30."""
+    from scipy.spatial import cKDTree
+    P = np.asarray(P, float)
+    if len(P) < 24:
+        return 1.0
+    r = np.random.default_rng(seed)
+    idx = r.choice(len(P), size=min(nsamp, len(P)), replace=False)
+    T = cKDTree(P)
+    es = []
+    for i in idx:
+        _, nb = T.query(P[i], k=min(k, len(P)))
+        C = P[nb] - P[nb].mean(0)
+        s = np.linalg.svd(C, full_matrices=False)[1]
+        es.append(s[0] / (s[1] + 1e-9))
+    return float(np.median(es))
+
+
 def _paired(P):
     """A PAIRED organ = two lateral masses with a midline GAP, not one midline blob. Returns (is_paired, detail)."""
     z = np.asarray(P, float)[:, 2] - np.median(np.asarray(P, float)[:, 2])
@@ -182,12 +213,26 @@ def _organ_feats(name, P, R):
     tort = _tortuosity(P); F = []
     def add(feat, ok, detail): F.append(dict(feature=feat, passed=bool(ok), detail=detail))
     if name == "Heart":
-        chambers = [c for c in ("Atrium", "Ventricle", "Outflow") if c in R.get("_organ_present", set())]
+        # v1.3 recalibration (2026-09-05): the chamber split assigns "Left/Right Ventricle", never bare
+        # "Ventricle" -- the old check failed on naming. And "hollow (has cavities)" was unpassable even by
+        # the bp3d reference heart (hollow 0.00: the whole-mass cavity statistic cannot see 4 chamber lumens
+        # around a septum) -- replaced by REAL SIZE, which catches the oversized-chamber fault class
+        # (reference heart span = 0.072 of stature; bp3d 115/1655mm = 0.070).
+        pres = R.get("_organ_present", set())
+        vent = [c for c in ("Ventricle", "Left Ventricle", "Right Ventricle") if c in pres]
+        chambers = [c for c in ("Atrium", "Outflow") if c in pres] + vent
         add("compact (not elongated, elong<2.5)", e < 2.5, f"elong {e:.2f}")
-        add("chambered (>=3 chamber subheads)", len(chambers) >= 3, f"chambers {chambers}")
-        add("hollow (has cavities)", hol >= 0.3, f"hollow {hol:.2f}")
+        add("chambered (atrium + ventricle + outflow)",
+            "Atrium" in pres and vent and "Outflow" in pres, f"chambers {chambers}")
+        frac = _span(P) / (_stature(R) + 1e-9)
+        add("real-sized (span 4-11% of stature)", 0.04 <= frac <= 0.11, f"span/stature {frac:.3f}")
     elif name == "Lung":
-        add("low-density/air (hollow>=0.4)", hol >= 0.4, f"hollow {hol:.2f}")
+        # v1.3: "low-density/air (hollow>=0.4)" was unpassable by the reference lung too (hollow 0.00 --
+        # cells cannot encode air, and the reference surface reads solid under the whole-mass statistic).
+        # The measurable identity = LOBATION: >=4 of the 5 named lobe fates present.
+        lobes = [c for c in ("Right Superior Lobe", "Right Middle Lobe", "Right Inferior Lobe",
+                             "Left Superior Lobe", "Left Inferior Lobe") if c in R.get("_organ_present", set())]
+        add("lobed (>=4 of 5 named lobes)", len(lobes) >= 4, f"lobes {len(lobes)}/5")
         p, pd = _paired(P); add("paired (L+R lungs)", p, pd)
     elif name == "Kidney":
         add("reniform (1.5<=elong<=3.2)", 1.5 <= e <= 3.2, f"elong {e:.2f}")
@@ -196,9 +241,15 @@ def _organ_feats(name, P, R):
         add("lateralised to one side (|lat|>=1)", lat >= 1.0, f"lat {lat:.2f}")
         add("bulky solid (not hollow)", hol < 0.2, f"hollow {hol:.2f}")
     elif name == "Gut":
-        add("tube (elongated, elong>=2)", e >= 2.0, f"elong {e:.2f}")
+        # v1.3 recalibration (2026-09-05): the old "tube (elong>=2)" was the EMBRYONIC spanning-thread
+        # signature -- the reference adult gut, coiled into the abdomen, reads elong 1.24 and could never
+        # pass. And "has a lumen (hollow>=0.3)" was representation-biased (bp3d surface passes at 0.43; a
+        # solid cell cloud reads 0.00; the lumen is sub-resolution at ~88k body cells). The measurable adult
+        # identity: locally-1D tube (survives coiling), tortuous path, packed into a compact mass.
+        le = local_anisotropy(P)
+        add("tube (locally 1D, local anisotropy>=1.38)", le >= 1.38, f"localE {le:.2f} (ref 1.55, blob 1.30)")
         add("coiled (tortuous>=1.2)", tort >= 1.2, f"tort {tort:.2f}")
-        add("has a lumen (hollow>=0.3)", hol >= 0.3, f"hollow {hol:.2f}")
+        add("packed abdominal mass (elong<2.2)", e < 2.2, f"elong {e:.2f} (ref 1.24)")
     elif name in ("Forebrain", "Cerebellum"):               # cerebrum / cerebellum = ROUNDED masses
         add("rounded (elong<2.6)", e < 2.6, f"elong {e:.2f}")
         add("bulky (>=200 cells)", len(P) >= 200, f"n={len(P)}")
@@ -240,6 +291,11 @@ def _skew(P):
 def check_vertebra(name, P):
     d = _desc(P); F = []
     F.append(dict(feature="non-degenerate (>=20 cells)", passed=len(P) >= 20, detail=f"n={len(P)}"))
+    if "sacrum" in name:                                     # the fused S1-S5 composite (cycle 47)
+        F.append(dict(feature="midline (not lateralised)", passed=bilateral_ok(P) < 0.5,
+                      detail=f"lat {bilateral_ok(P):.2f}"))
+        F.append(dict(feature="fused wedge (elong<=3)", passed=d["elong"] <= 3.0, detail=f"elong {d['elong']:.2f}"))
+        return F
     F.append(dict(feature="blocky/cuboidal body (elong<=2.3)", passed=d["elong"] <= 2.3, detail=f"elong {d['elong']:.2f}"))
     sk = _skew(P)
     F.append(dict(feature="posterior process (skew>=0.3)", passed=sk >= 0.3, detail=f"skew {sk:.2f}"))
@@ -270,6 +326,11 @@ def check_girdle(name, P):
     if d is None:
         return [dict(feature="non-degenerate (>=20 cells)", passed=False, detail=f"n={len(P)}")]
     e, f = d["elong"], d["flat"]
+    if "hip_bone" in name:                                   # the fused os coxae composite (cycle 47)
+        F.append(dict(feature="fused of 3 parts (>=60 cells)", passed=len(P) >= 60, detail=f"n={len(P)}"))
+        F.append(dict(feature="lateralised (paired)", passed=bilateral_ok(P) >= 1.0,
+                      detail=f"lat {bilateral_ok(P):.2f}"))
+        return F
     if "clavicle" in name:
         F.append(dict(feature="long bone (elong>=3)", passed=e >= 3.0, detail=f"elong {e:.2f}"))
     elif "scapula" in name:
@@ -314,11 +375,25 @@ def collect_all_parts(R):
             P = part.get("P") if isinstance(part, dict) else None
             if P is not None:
                 parts.append((f"{grp}:{nm}", grp, np.asarray(P), dict(paired=nm.endswith(("-R", "-L")))))
+    # THE HIP BONE (cycle 47, the declared-union join): bp3d ships the FUSED os coxae only, so the
+    # model's ilium+ischium+pubis score as one composite against it (the wall-of-heart pattern);
+    # the constituent parts keep their own rows.
+    for side in ("L", "R"):
+        comp = [np.asarray(R["pelvic_girdle"][f"{nm}-{side}"]["P"]) for nm in ("ilium", "ischium", "pubis")
+                if f"{nm}-{side}" in R.get("pelvic_girdle", {})
+                and R["pelvic_girdle"][f"{nm}-{side}"].get("P") is not None]
+        if len(comp) == 3:
+            parts.append((f"pelvic_girdle:hip_bone-{side}", "pelvic_girdle", np.vstack(comp), dict(paired=True)))
     V = R.get("vertebrae", {})
     if "P" in V:
         Vn = np.asarray(V["name"])
         for nm in np.unique(Vn):
             parts.append((f"vertebra:{nm}", "vertebrae", V["P"][Vn == nm], {}))
+        # THE SACRUM (cycle 47): the fused bone = the S1-S5 union, the composite that matches the
+        # bp3d sacrum mesh (single sacral vertebrae go honestly unmatched -- no source ships them)
+        sm = np.isin(Vn, [f"S{i}" for i in range(1, 6)])
+        if sm.sum() >= 20:
+            parts.append(("vertebra:sacrum", "vertebrae", V["P"][sm], {}))
     for limb, dct in R.get("limb_bones", {}).items():
         P = dct.get("P"); bl = np.asarray(dct.get("bone", []))
         if P is not None and len(bl) == len(P):
@@ -328,7 +403,7 @@ def collect_all_parts(R):
         P = dct.get("P"); nm = np.asarray(dct.get("name", []))
         if P is not None and len(nm) == len(P):
             parts.append((f"{limb}:hand-or-foot", "autopod", P, dict(names=nm, paired=True)))
-    for grp in ("patella", "hyoid"):
+    for grp in ("patella", "hyoid", "tongue", "sinus"):
         for nm, part in R.get(grp, {}).items():
             P = part.get("P") if isinstance(part, dict) else None
             if P is not None:
@@ -339,9 +414,13 @@ def collect_all_parts(R):
     if base is not None and F is not None:
         present = {k for k in FIDX if (F == FIDX[k]).sum() >= 8}
         R["_organ_present"] = present
-        composites = {"Heart": ("Heart", "Atrium", "Ventricle", "Outflow"), "Gut": ("Gut", "Foregut", "Hindgut")}
+        composites = {"Heart": ("Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow"),
+                      "Gut": ("Gut", "Foregut", "Hindgut")}
+        from medic.subhead_program import composites as _sub_comp    # sub-head PROGRAM: children fold into their organ
+        composites.update(_sub_comp())
+        _sub_children = {c for parts in composites.values() for c in parts[1:]}
         for organ, idx in FIDX.items():
-            if organ in ("Atrium", "Ventricle", "Outflow", "Foregut", "Hindgut"):
+            if organ in _sub_children:
                 continue                                     # folded into the Heart / Gut composite
             if organ in composites:
                 Po = base[np.isin(F, [FIDX[c] for c in composites[organ] if c in FIDX])]
@@ -355,6 +434,21 @@ def collect_all_parts(R):
         for nm, hm in R.get(grp, {}).items():
             if hm.get("P") is not None and len(hm["P"]) >= 6:
                 parts.append((f"muscle:{nm}", "muscle", np.asarray(hm["P"]), dict(O=hm["O"], I=hm["I"])))
+    # TEETH (cycle 47, the per-tooth join): the model HAS 32 lateral-inhibition-spaced teeth; each
+    # gets a row NAMED ON THE BP3D CONVENTION (position from midline -> central/lateral incisor,
+    # canine, first/second premolar, first..third molar) so the canonical join is mechanical. bp3d
+    # ships no third molars -- those go honestly unmatched.
+    _TOOTH_POS = {1: "central incisor", 2: "lateral incisor", 3: "canine", 4: "first premolar",
+                  5: "second premolar", 6: "first molar", 7: "second molar", 8: "third molar"}
+    for arch, teeth in R.get("teeth", {}).items():
+        up = "upper" if arch == "maxillary" else "lower"
+        for side in ("R", "L"):
+            row = sorted((t for t in teeth if t.get("P") is not None and len(t["P"]) >= 6
+                          and (float(np.asarray(t["pos"])[2]) > 0) == (side == "R")),
+                         key=lambda t: abs(t.get("t", 0.0)))
+            for i, t in enumerate(row[:8], 1):
+                parts.append((f"tooth:{up} {_TOOTH_POS[i]}-{side}", "tooth",
+                              np.asarray(t["P"]), dict(paired=True)))
     return parts
 
 
@@ -393,13 +487,14 @@ def _limb_siblings(R, femur_name):
     return [(bn, dict(P=P[bl == bn])) for bn in np.unique(bl) if bn != "femur"]
 
 
-def run():
+def run(R=None):
     from medic.integrated_body import assemble
     os.makedirs(OUTDIR, exist_ok=True)
     for _f in os.listdir(OUTDIR):                               # clear stale per-part files from prior runs
         if _f.endswith(".json"):
             os.remove(os.path.join(OUTDIR, _f))
-    R = assemble()
+    if R is None:                                               # benchmark_suite passes one shared specimen
+        R = assemble()
     parts = collect_all_parts(R)
     # add the skull as a WHOLE composite (identity-level braincase checklist)
     scored = [score_part("skull:__whole__", "skull", np.vstack([v["P"] for v in R.get("skull", {}).values()

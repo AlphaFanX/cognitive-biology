@@ -58,15 +58,21 @@ def carve(base, F, pd_bounds=None):
     """The limb chondrogenesis head. `pd_bounds` = the two PD cut fractions (stylopod|zeugopod|autopod),
     the tunable knob; None -> the tuned values. Returns per-limb (points, PD coord, segment, bone name)."""
     if pd_bounds is None:
-        # stylopod (femur/humerus) is LONGER than the zeugopod (Gray's: the femur is the longest bone; the
-        # scorecard found femur < tibia). b1=0.38 -> stylopod 0.38 > zeugopod 0.30 > autopod 0.32.
-        tk = tuned("limb_chondro", {"b1": 0.38, "b2": 0.68})
-        pd_bounds = (tk["b1"], tk["b2"])
-    segs_def = [("stylopod", 0.0, pd_bounds[0]), ("zeugopod", pd_bounds[0], pd_bounds[1]),
-                ("autopod", pd_bounds[1], 1.01)]
+        # MEASURED per-kind PD cuts (cycle 57, the gods-panel crural fault): the old shared (0.38,
+        # 0.68) gave the AUTOPOD A THIRD of every limb -- an arm-like partition on the legs too --
+        # so the femur read 0.30x the canonical fraction and the crural index collapsed to 37.8.
+        # The Hox boundary fractions (Meis | Hoxa11 | Hoxa13) are now MEASURED CONSTANTS from the
+        # canon's own bones (the measurement table's mm frame): hind = femur 51% | tibia 39% | pes
+        # 10% of the limb; fore = humerus 45% | forearm 40% | manus 15%.
+        tk = tuned("limb_chondro", {"fore_b1": 0.45, "fore_b2": 0.85, "hind_b1": 0.51, "hind_b2": 0.90})
+        kind_bounds = {"fore": (tk["fore_b1"], tk["fore_b2"]), "hind": (tk["hind_b1"], tk["hind_b2"])}
+    else:
+        kind_bounds = {"fore": tuple(pd_bounds), "hind": tuple(pd_bounds)}
     body_c = base.mean(0)
     res = {}
     for name, (kind, Q) in _limbs(base, F).items():
+        b1, b2 = kind_bounds[kind]                            # the limb's OWN measured Hox cuts
+        segs_def = [("stylopod", 0.0, b1), ("zeugopod", b1, b2), ("autopod", b2, 1.01)]
         # PROXIMODISTAL axis = the bud's own long axis (PCA), oriented so proximal (near the body) = 0.
         C = Q - Q.mean(0)
         pc = np.linalg.svd(C, full_matrices=False)[2][0]
@@ -74,6 +80,20 @@ def carve(base, F, pd_bounds=None):
         # orient: the proximal end is the one nearer the body centroid
         if np.linalg.norm(Q[pd.argmax()] - body_c) < np.linalg.norm(Q[pd.argmin()] - body_c):
             pd = -pd
+        # INTERSTITIAL RE-SPACING, HIND ONLY (cycle 58, the growth-plate ladder): the LEG bud's cells
+        # bunch along the column (cycle 57 measured it: the femur's cells did not REACH through its
+        # allocated band -- crural overshot to 1.29 while femur/stature fell). Rank-uniform PD
+        # positions (cross-section kept) make a Hox cut fraction a span fraction by construction:
+        # crural 1.29 -> 0.94. SCOPED: applying it to the FORE limb broke a bud that was already
+        # well-distributed (brachial 0.749 -> 0.153 through the rigid-warp fit) -- the arm keeps its
+        # native spacing.
+        if kind == "hind":
+            _ord = np.argsort(pd)
+            _pd_new = np.empty_like(pd)
+            _pd_new[_ord] = pd.min() + (np.arange(len(pd)) / max(1, len(pd) - 1)) * np.ptp(pd)
+            Q = Q + np.outer(_pd_new - pd, pc)
+            C = Q - Q.mean(0)
+            pd = _pd_new
         pdn = (pd - pd.min()) / (np.ptp(pd) + 1e-9)          # 0 proximal .. 1 distal (Meis->Hoxa13)
         # GIRTH = the PERICHONDRIUM: shrink the paddle's width to a fixed fraction of the bud's OWN native
         # girth -- a LENGTH-INDEPENDENT perichondrial radius, NOT a fraction of PD LENGTH. The old
@@ -86,12 +106,12 @@ def carve(base, F, pd_bounds=None):
         BULGE = tuned("limb_chondro", {"epiphysis": 1.6}).get("epiphysis", 1.6)
         proj = C @ pc
         perp = C - np.outer(proj, pc)                         # offset perpendicular to the PD axis
-        long_m = pdn < (pd_bounds[1] if pd_bounds else 0.67)  # stylopod + zeugopod only (autopod stays a SHORT bone)
+        long_m = pdn < b2                                     # stylopod + zeugopod only (autopod stays a SHORT bone)
         # EPIPHYSES: each long bone is WIDER at its two ends (the head + condyles / metaphyses) than at its
         # shaft -- Gray's, and the scorecard's femur check (end/shaft radius). Widen the perichondrial girth
         # toward each SEGMENT's ends (fraction 0 and 1 within stylopod / zeugopod) with a U-shaped profile.
         seg_frac = np.zeros(len(Q))
-        for lo, hi in ((0.0, pd_bounds[0]), (pd_bounds[0], pd_bounds[1])):
+        for lo, hi in ((0.0, b1), (b1, b2)):
             ms = (pdn >= lo) & (pdn < hi)
             seg_frac[ms] = (pdn[ms] - lo) / (hi - lo + 1e-9)
         girth = PERI * (1.0 + BULGE * (2.0 * seg_frac - 1.0) ** 2)     # wide ends (epiphyses), narrow shaft
@@ -119,6 +139,7 @@ def finger_toes(res, n_dig=5, per=12):
     digit 5), Hoxa13/Hoxd13 make the autopod, Sox9 condenses each ray, interdigital BMP frees them. Here
     the autopod cells seed 5 rays fanned across the transverse axis and extended distally (middle digits
     longest). Returns per-limb {P, name}."""
+    rng = np.random.default_rng(0)
     out = {}
     for name, r in res.items():
         auto = r["seg"] == "autopod"
@@ -131,22 +152,30 @@ def finger_toes(res, n_dig=5, per=12):
         C = Q - c0
         Cperp = C - np.outer(C @ distal, distal)                   # remove the PD component
         trans = np.linalg.svd(Cperp, full_matrices=False)[2][0]    # the spread (radio-ulnar) axis
+        thick = np.cross(distal, trans); thick /= np.linalg.norm(thick) + 1e-9  # dorso-ventral (palm depth)
         # the model's autopod is a tiny plate, so digits grown at its raw extent are invisible bunched stubs.
-        # Grow the hand/foot to an anatomically visible size: fingers ~2.5x the plate extent, fanned ~1.8x wider,
-        # so distinct rays read as fingers/toes (the metacarpals + phalanges of a real hand).
-        L = 2.5 * (np.ptp(C @ distal) + 1e-6)                      # digit length (longer than the raw plate)
-        span = 1.8 * (2.0 * np.percentile(np.abs(C @ trans), 90) + 1e-6)   # wider fan -> separated digits
+        # A real hand/foot is a LONG FLAT PADDLE, not a round clump: the fingers reach well beyond the palm
+        # width (elongated) and the whole thing has a small dorso-ventral thickness (flat, not a 2-D sheet).
+        # The old layout grew a wide fan of zero-thickness lines -> elong ~1.2, flat 0.0; both are corrected.
+        pd_ext = np.ptp(C @ distal) + 1e-6
+        tr_ext = 2.0 * np.percentile(np.abs(C @ trans), 90) + 1e-6
+        L = 9.0 * pd_ext                                           # long fingers -> elongated paddle (canon elong ~6.6)
+        span = 1.15 * tr_ext                                       # palm width (across the rays)
+        depth = 0.24 * span                                        # palm/finger dorso-ventral thickness (canon flat ~0.22)
+        drad = 0.045 * span                                        # per-finger radius (keeps rays separate)
         mc = "metacarpal" if r["kind"] == "fore" else "metatarsal"  # Gray's: proximal ray = metacarpal/tarsal,
         pts, nm = [], []                                            # the rest = phalanges
         for d in range(n_dig):
             frac = d / (n_dig - 1) - 0.5                            # -0.5 .. 0.5 across the hand
             base_p = c0 + trans * frac * span
-            ray = distal + trans * frac * 0.9                      # fan the rays apart (splayed fingers)
-            ray /= np.linalg.norm(ray) + 1e-9
+            ray = distal + trans * frac * 0.22                     # MILD fan (was 0.9): fingers stay near-parallel
+            ray /= np.linalg.norm(ray) + 1e-9                      # so the paddle is long, not round
             length = L * (1.3 - 0.5 * abs(frac))                   # middle digits longest, thumb/little shorter
             for t in np.linspace(0.10, 1.0, per):
                 seg = mc if t < 0.4 else "phalanx"                 # proximal 40% metacarpal, distal phalanges
-                pts.append(base_p + ray * length * t); nm.append(f"{name} {seg} {d + 1}")
+                ctr = base_p + ray * length * t
+                off = trans * rng.uniform(-drad, drad) + thick * rng.uniform(-depth, depth)  # 3-D volume
+                pts.append(ctr + off); nm.append(f"{name} {seg} {d + 1}")
         out[name] = dict(P=np.array(pts), name=np.array(nm), kind=r["kind"])
     return out
 

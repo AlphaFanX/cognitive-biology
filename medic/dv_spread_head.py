@@ -25,6 +25,8 @@ TARGETS_PATH = "data/organ_cascade/bp3d_insitu_dv.json"
 # our fate -> the BodyParts3D-measured organ whose in-situ depth it should take (local-trunk DV, 0=ventral..1=dorsal)
 DV_GROUP = {
     "Heart": "Heart", "Atrium": "Heart", "Ventricle": "Heart", "Outflow": "Heart",
+    "Left Ventricle": "Heart", "Right Ventricle": "Heart",   # sub-heads must map into their organ's packing
+    #                                    group or they silently fall out of the viscera mask (tier-C artifact)
     "Lung": "Lung",
     "Liver": "Liver", "LiverHaem": "Liver",
     "Kidney": "Kidney", "Nephron": "Kidney",
@@ -34,6 +36,8 @@ DV_GROUP = {
     "Gut": "SmallIntestine", "Hindgut": "LargeIntestine",
     "Bladder": "Bladder",
 }
+from medic.subhead_program import extend_dv_group as _sub_dvg        # sub-head PROGRAM: child packs with its organ
+_sub_dvg(DV_GROUP)
 
 
 def _targets():

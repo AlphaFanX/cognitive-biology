@@ -50,7 +50,7 @@ from medic.human_movie import (shape_limbs, flex, mature_cloud, grow_limbs, _lim
 
 NE = 120000                                     # cloud size (ultra fidelity; -> ~240k after symmetrization)
 OUT = Path("data/organ_cascade/adult_persistence_audit")
-CHAMBERS = {"Heart": ["Heart", "Atrium", "Ventricle", "Outflow"]}   # the heart chambers by the final frame
+CHAMBERS = {"Heart": ["Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow"]}   # the heart chambers by the final frame
 HEAD_FATES = ("Forebrain", "Eye", "Midbrain", "Hindbrain")
 LIMB_IDS = [FIDX[n] for n in ("Limb Bud", "Cartilage") if n in FIDX]   # appendicular -- excluded from the AXIAL CE metric
 FS = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)             # maturation fractions sampled embryo(0) -> adult(1)
@@ -183,7 +183,7 @@ def build_base(ne=NE):
     # (its anchor 0.38 and 0.58 snap to the SAME antinode), so apply the descent explicitly -- shift the heart-
     # family cells caudally so the matured heart lands at its atlas mid-thorax address (~0.56), at/just below the
     # lung. Read-only on every other cell; the heart is a coherent condensed mass, so it descends as a body.
-    heart_ids = [FIDX[n] for n in ("Heart", "Atrium", "Ventricle", "Outflow") if n in FIDX]
+    heart_ids = [FIDX[n] for n in ("Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow") if n in FIDX]
     hm = np.isin(F, heart_ids)
     if hm.sum() >= 8:
         x = base[:, 0]; L = np.ptp(x) + 1e-9
@@ -210,6 +210,10 @@ def build_base(ne=NE):
     # heart's own (lateralised, descended) centroid so its address is kept. Read-only on every non-heart cell.
     from medic.heart_tube_head import apply as _heart_tube
     base, F = _heart_tube(base, F)
+    # SUB-HEAD PROGRAM: relabel each parent organ's cells into its Gray's sub-parts, ordered on the parent's
+    # own operator (kidney cortex/medulla/pelvis by radial shell, etc.). Table-driven -- add a row, not code.
+    from medic.subhead_program import apply as _sub_apply
+    F = _sub_apply(base, F, FIDX)
     # ORGAN ASPECT (stage-1 shape knob): give each aspect-fixable organ the PCA-axis aspect that best matches its
     # isolated canonical mesh (medic.organ_shape_search's D2 knob search), volume-preserving so the address+size
     # are kept. Excludes heart (heart_tube), subheads, bones, and topology-limited organs. Read-only per organ.
@@ -262,12 +266,52 @@ def build_base(ne=NE):
     # kidney DV cut already equals the radial-shell split (agrees 1.00), and the brain/eye are AP-ordered regions
     # a naive geodesic would scramble (the brain is a chain+cerebellar-branch). Only the FOLDED heart genuinely
     # needed the attractor (the tube above). So no further subhead reassignment is wired.
+    # NICHE RETENTION (cycle 49, the fifth behaviour's heterotypic case): LiverHaem is BORN intermixed
+    # (every 6th liver-pool cell, the Gata1 partition) but its genomic parameters are weakly-adhesive
+    # and GJ-UNCOUPLED (ADH/ECM 0.30, g_gj 0.20 -- blood does not couple), so the build's own Steinberg
+    # sorting EXPELS the low-adhesion phase from the condensing liver -- correct physics, missing
+    # biology: real HSCs are held in the hepatic sinusoids by the NICHE signal (SCF/CXCL12 heterotypic
+    # anchoring). Strays re-anchor to their niche family BEFORE the deaths, so they come home instead
+    # of being eaten (the anoikis ledger had killed ~174 LiverHaem strays per build -- the flag, not
+    # the cure).
+    from scipy.spatial import cKDTree as _KD
+    for _sub, _host in {"LiverHaem": "Liver"}.items():
+        _ms, _mh = F == FIDX.get(_sub, -1), F == FIDX.get(_host, -1)
+        if _ms.sum() >= 8 and _mh.sum() >= 60:
+            _T = _KD(base[_mh])
+            _dn, _ = _T.query(base[_mh][:: max(1, int(_mh.sum()) // 1500)], k=2)
+            _sp = float(np.median(_dn[:, 1])) + 1e-9
+            _d, _i = _T.query(base[_ms], k=1)
+            _farm = _d > 1.2 * _sp
+            if _farm.any():
+                _si = np.where(_ms)[0][_farm]
+                _rng9 = np.random.default_rng(FIDX[_sub] * 104729)
+                base[_si] = base[_mh][_i[_farm]] + _rng9.normal(size=(len(_si), 3)) * _sp * 0.6
+                print(f"  [niche] {_sub}: {len(_si)} strays re-anchored into {_host}")
+    # ANOIKIS (the apoptosis head -- the fourth fundamental cell behaviour: divide/differentiate/migrate/DIE):
+    # a cell that has lost contact with its own organ's gap-junction neighbourhood loses its survival signal
+    # and dies. Runs LAST so it cleans the FINAL placement's stragglers; kill capped at 2% and reported per
+    # fate, so a big kill on one fate flags a placement fault to fix at its head, not hide here.
+    from medic.anoikis_head import apply as _anoikis
+    base, F, _ = _anoikis(base, F)
+    # PER-PART DENSITY FLOORS (cycle 37, 2026-09-04): the named small parts were cell-starved to
+    # unscorability (Bladder 28 / Gonad 16 / Adrenal 32 / OlfactoryBulb 40 / pancreatic 87-146 /
+    # renal subparts 109-130) -- allocation before total (detail ~ n^(1/3); the hands proved 302
+    # cells was the binding constraint). Jittered in-place cloning to a 150-cell floor, explicit
+    # allowlist, AFTER the deaths so the honest cleaned core is what gets densified.
+    from medic.density_floor_head import apply as _floor
+    base, F, _ = _floor(base, F)
+    # SMALL-ORGAN FORM (cycle 38): the parts the floors just gave substrate take their shapes --
+    # bladder = hollow urogenital-sinus vesicle (never solid in life; grays hollow>=0.2), pancreas
+    # = the PDX1/PTF1A gland elongated head->tail along the dorsal mesentery (grays elong>=1.5).
+    from medic.small_organ_form_head import apply as _form
+    base, F = _form(base, F)
     return base, F
 
 
 # organs that should read as condensed, sharply-bounded masses (not the spanning tubes Gut/Notochord/Vessel or
 # the axial segmental series Cartilage/Rib/Muscle/Somite, which are meant to be extended, not balled up).
-_CONDENSE_ORGANS = ("Heart", "Atrium", "Ventricle", "Outflow", "Lung", "Liver", "Kidney", "Nephron", "Eye",
+_CONDENSE_ORGANS = ("Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow", "Lung", "Liver", "Kidney", "Nephron", "Eye",
                     "Retina", "Pancreas", "Otic", "Spleen", "Thymus", "Adrenal", "Bladder",
                     "Forebrain", "Midbrain", "Hindbrain", "Cerebellum")
 

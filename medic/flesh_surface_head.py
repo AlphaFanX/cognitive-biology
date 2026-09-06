@@ -55,23 +55,130 @@ def _dense_bellies(muscles, per=140, thick=0.26, rng=None):
     return np.vstack(out) if out else np.zeros((0, 3))
 
 
-def _subcutaneous_fat(muscle, frac=0.06, n=6000, rng=None):
-    """A thin fat SHELL just outside the muscle mass: take the OUTER muscle cells (per AP slice x sector, the
-    envelope) and push them radially outward by `frac` of the body radius -> the panniculus adiposus that
-    rounds the muscle bellies into a smooth contour. Returns the fat points."""
-    if rng is None:
-        rng = np.random.default_rng(0)
-    S = shell(muscle, n_slice=60, n_sec=40, dens=2)                 # the muscle envelope
+def ventral_sign(body, F):
+    """The body's anterior (ventral) DV sign, read off the cloud -- SHARED by flesh_skin + human_movie
+    (feet point the way the face looks). PRIORITY ANCHOR (2026-08-30, Miles "the feet point the wrong way"):
+    KIDNEY-vs-HEART -- the kidney is placed DORSAL of the heart by measured construction (dv_spread), both
+    compact localized viscera, and the relation SURVIVES the movie's laying/maturation transform. (The first
+    fix used heart-vs-spinal-cord, but the cord spans the whole curved trunk and its DV MEDIAN flipped sides
+    in the laid frame: heart +0.01 vs cord +0.06 vs kidney -0.10 -- kidney-heart right, cord wrong.) The old
+    eye-vs-brain rule flips when the eyes sit near the head's DV midline (~1%H dorsal of it = the original
+    wrong-way feet). Fallbacks keep the old rules. Returns +1.0 or -1.0 on the laid-frame y axis."""
+    from medic.unified_embryo import FIDX
+    from medic.subhead_program import expand_names
+    body = np.asarray(body, float); F = np.asarray(F)
+    heart_ids = [FIDX[n] for n in ("Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle",
+                                   "Outflow") if n in FIDX]
+    kid_ids = [FIDX[n] for n in expand_names(["Kidney", "Nephron"]) if n in FIDX]
+    hm, km = np.isin(F, heart_ids), np.isin(F, kid_ids)
+    if hm.sum() > 20 and km.sum() > 20:
+        return 1.0 if np.median(body[hm, 1]) >= np.median(body[km, 1]) else -1.0
+    eye_ids = [FIDX[n] for n in ("Eye", "Retina") if n in FIDX]
+    brain_ids = [FIDX[n] for n in ("Forebrain", "Midbrain", "Hindbrain") if n in FIDX]
+    if eye_ids and brain_ids and np.isin(F, eye_ids).sum() > 8 and np.isin(F, brain_ids).sum() > 8:
+        return 1.0 if np.median(body[np.isin(F, eye_ids), 1]) >= np.median(body[np.isin(F, brain_ids), 1]) else -1.0
+    for nm in ("Notochord", "Spinal Cord"):
+        if nm in FIDX and (F == FIDX[nm]).sum() > 20:
+            return -1.0 if np.median(body[F == FIDX[nm], 1]) >= np.median(body[:, 1]) else 1.0
+    return 1.0
+
+
+def _fat_shell(cells, frac, rng):
+    """The fat core: envelope of `cells` around ITS OWN axis, pushed radially out by frac of its radius."""
+    S = shell(cells, n_slice=60, n_sec=40, dens=2)
     if not len(S):
-        return muscle[:0]
-    x = S[:, 0]
-    cy, cz = np.median(muscle[:, 1]), np.median(muscle[:, 2])       # body axis (DV, ML)
-    R = np.percentile(np.hypot(muscle[:, 1] - cy, muscle[:, 2] - cz), 95) + 1e-9
+        return cells[:0]
+    cy, cz = np.median(cells[:, 1]), np.median(cells[:, 2])
+    R = np.percentile(np.hypot(cells[:, 1] - cy, cells[:, 2] - cz), 95) + 1e-9
     d = np.hypot(S[:, 1] - cy, S[:, 2] - cz) + 1e-9
-    push = 1.0 + frac * R / d                                       # push each envelope point radially out
+    push = 1.0 + frac * R / d
     F = S.copy()
     F[:, 1] = cy + (S[:, 1] - cy) * push
     F[:, 2] = cz + (S[:, 2] - cz) * push
+    return F
+
+
+def _subcutaneous_fat(muscle, frac=0.06, n=6000, rng=None, arm_mask=None):
+    """A thin fat SHELL just outside the muscle mass -> the panniculus adiposus that rounds the muscle
+    bellies into a smooth contour. Returns the fat points.
+
+    v2 (2026-08-30, cycle 6): fat forms around EACH LEG separately below the fork. The v1 angular envelope
+    was built around the WHOLE-BODY axis, so at leg level the sectors aiming between the legs closed over
+    the gap -- a fat WEB across the crotch that re-bridged the thighs even after the tail-regression head
+    cleared the cell residue. Fork detection is self-reading: AP slices in the lower body whose midline
+    band is empty of layer cells are 'forked' -> per-side shells around each leg's own axis. On a body
+    whose legs are not yet extended (the build frame) no slice tests forked and v1 behaviour is unchanged."""
+    if rng is None:
+        rng = np.random.default_rng(0)
+    x = muscle[:, 0]
+    stat = np.ptp(x) + 1e-9
+    apf = (x - x.min()) / stat
+    mid = float(np.median(muscle[:, 2]))
+    # v3 (2026-08-31): the v2 per-slice test was BISTABLE (the ~2% midline band sat on
+    # a knife edge -> one build forked, the next fell back to the v1 skirt) and the
+    # per-leg + torso shells shared NO cells at the fork line -> a fat seam at the hip
+    # that marching-cubes could pinch into disconnected legs. v3: the fork is the
+    # CONTIGUOUS run of empty-midline slices from the bottom up (one borderline slice
+    # moves the crotch by one slice instead of flipping the whole mode), and the leg
+    # and torso shells OVERLAP across a band at the fork so the fat is continuous
+    # through the hip -- the panniculus does not stop at the perineum.
+    # scan ceiling 0.42 -> 0.50 (cycle 17): the canonical crotch tops out at ~0.44-0.48 of stature;
+    # with the ceiling at 0.42 the torso envelope started at 0.38 and draped fat across the open gap
+    # (measured: the last 68+68 midline flesh points at 0.38-0.46 were ALL torso-shell fat). The
+    # bridged-run stop (the perineal layer is midline-occupied) ends the fork at the true crotch.
+    nb = 28
+    slice_h = 0.50 / nb
+    fork_hi = 0.0                                                   # fork top (apf); 0 = no fork
+    bridged_run = 0
+    for k in range(nb):
+        lo = k * slice_h                                            # only the lower body can fork
+        sl = (apf >= lo) & (apf < lo + slice_h)
+        if sl.sum() < 40:
+            fork_hi = lo + slice_h                                  # sparse slice: pass through
+            continue
+        # band 0.02 -> 0.01 stat (cycle 17): the limb-condensation wall puts the columns' inner
+        # edges at ~0.011-0.021 stat -- a 0.02 band counts legitimate inner-column cells as
+        # "bridging" and the fork never rises past ~25%. The test band must be NARROWER than the
+        # condensation gap it is looking for.
+        midcnt = (sl & (np.abs(muscle[:, 2] - mid) < 0.01 * stat)).sum()
+        if midcnt < 0.02 * sl.sum():
+            fork_hi = lo + slice_h
+            bridged_run = 0
+        else:
+            bridged_run += 1                                        # one bridged slice may be debris;
+            if bridged_run >= 2:                                    # two consecutive end the fork
+                break
+    forked = apf < fork_hi
+    parts = []
+    if fork_hi > slice_h and forked.sum() >= 100:
+        band = 0.04                                                 # hip overlap band (frac of stature)
+        for sgn in (-1.0, 1.0):
+            leg = (apf < fork_hi + band) & ((muscle[:, 2] - mid) * sgn > 0)
+            if leg.sum() >= 50:
+                parts.append(_fat_shell(muscle[leg], frac, rng))
+        # the torso shell starts AT the fork (cycle 17): its old downward band re-draped fat across
+        # the open gap just below the crotch; hip continuity is already carried by the per-leg
+        # shells extending UP through [fork_hi, fork_hi + band].
+        up = apf > fork_hi
+        am = arm_mask if arm_mask is not None else np.zeros(len(muscle), bool)
+        if (up & am).sum() >= 100:
+            # THE ARM FORK (cycle 17b, the leg law's sibling): the panniculus forms around each
+            # ARM separately -- the single upper-body envelope swept its angular sectors across
+            # the axilla, filling the armpit notch and the wing tips with fat (census: 912
+            # cape-band + 22 wing-tip fat points). Per-arm shells around each arm's own axis;
+            # the torso shell keeps the arm's top band for shoulder continuity (the hip pattern).
+            tops = muscle[up & am, 0]
+            sh_band = float(np.percentile(tops, 95)) - 0.04 * stat
+            for sgn in (-1.0, 1.0):
+                a = up & am & ((muscle[:, 2] - mid) * sgn > 0)
+                if a.sum() >= 50:
+                    parts.append(_fat_shell(muscle[a], frac, rng))
+            parts.append(_fat_shell(muscle[up & (~am | (muscle[:, 0] > sh_band))], frac, rng))
+        else:
+            parts.append(_fat_shell(muscle[up], frac, rng))
+    else:
+        parts.append(_fat_shell(muscle, frac, rng))
+    F = np.vstack([p for p in parts if len(p)]) if parts else muscle[:0]
     if len(F) > n:
         F = F[rng.choice(len(F), n, replace=False)]
     return F + rng.normal(size=F.shape) * 0.004
@@ -161,19 +268,7 @@ def flesh_skin(body, F, push=0.06, layers=3, rng=None, with_bellies=True):
             add.append(b)
     layer = np.vstack([body] + add) if add else body
     fat = _subcutaneous_fat(layer, frac=0.04, n=max(2000, len(layer) // 6), rng=rng)
-    # anterior (ventral) sign so the FEET point FORWARD (the way the FACE looks). The EYES are the definitive
-    # anterior marker -- they sit on the front of the head -- and are more reliable than the near-midline spine in
-    # this DV-flat body. anterior = the DV direction from the brain toward the eyes.
-    ventral = None
-    eye_ids = [FIDX[n] for n in ("Eye", "Retina") if n in FIDX]
-    brain_ids = [FIDX[n] for n in ("Forebrain", "Midbrain", "Hindbrain") if n in FIDX]
-    if eye_ids and brain_ids and np.isin(F, eye_ids).sum() > 8 and np.isin(F, brain_ids).sum() > 8:
-        ventral = 1.0 if np.median(body[np.isin(F, eye_ids), 1]) >= np.median(body[np.isin(F, brain_ids), 1]) else -1.0
-    else:
-        for nm in ("Notochord", "Spinal Cord"):                # fallback: opposite the dorsal axis
-            if nm in FIDX and (F == FIDX[nm]).sum() > 20:
-                ventral = -1.0 if np.median(body[F == FIDX[nm], 1]) >= np.median(body[:, 1]) else 1.0
-                break
+    ventral = ventral_sign(body, F)
     # feet=False: the movie supplies its own genome-plausible autopods (human_movie.feet_mesh); building the
     # skin shell's schematic feet too gave the body FOUR feet.
     return _model_skin(np.vstack([layer, fat]), ventral=ventral, feet=False)

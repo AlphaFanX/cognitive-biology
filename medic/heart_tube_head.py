@@ -56,6 +56,18 @@ def apply(base, F):
     for k, nm in enumerate([str(x) for x in fates]):
         if nm in FIDX:
             F2[idx[k]] = FIDX[nm]
+    # SUB-HEAD (the recursion cascade found the ventricle still reads as a chain): split the ventricle
+    # across the interventricular SEPTUM into the Left (Hand1) and Right (Hand2) ventricles -- its two
+    # named parts in Gray's. The septum is the mediolateral division of the looped ventricle segment.
+    vfid = FIDX.get("Ventricle")
+    if vfid is not None and "Left Ventricle" in FIDX and "Right Ventricle" in FIDX:
+        vmask = F2 == vfid
+        if vmask.sum() > 20:
+            vi = np.where(vmask)[0]
+            z = base2[vi, 2]                                 # LR (body mediolateral) = the septal axis
+            side = z - np.median(z)
+            F2[vi[side >= 0]] = FIDX["Left Ventricle"]
+            F2[vi[side < 0]] = FIDX["Right Ventricle"]
     return base2, F2
 
 

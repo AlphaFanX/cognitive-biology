@@ -1,0 +1,136 @@
+{
+ "tuned": [
+  {
+   "head": "skin_placode",
+   "knob": "wl_frac",
+   "before": {
+    "wl_frac": 0.09
+   },
+   "after": {
+    "wl_frac": 0.12333333333333334
+   },
+   "before_score": 0.9308,
+   "after_score": 0.9509
+  },
+  {
+   "head": "vasculature",
+   "knob": [
+    "step",
+    "d_inf",
+    "d_kill"
+   ],
+   "before": {
+    "step": 0.028,
+    "d_inf": 0.22,
+    "d_kill": 0.05
+   },
+   "after": {
+    "step": 0.02,
+    "d_inf": 0.14,
+    "d_kill": 0.044000000000000004
+   },
+   "before_score": 1.1215,
+   "after_score": 1.1793
+  },
+  {
+   "head": "branching_lung",
+   "knob": [
+    "step_f",
+    "dinf_f",
+    "dkill_f"
+   ],
+   "before": {
+    "step_f": 0.11,
+    "dinf_f": 0.9,
+    "dkill_f": 0.16
+   },
+   "after": {
+    "step_f": 0.06,
+    "dinf_f": 0.9,
+    "dkill_f": 0.128
+   },
+   "before_score": 1.0993000268936157,
+   "after_score": 1.1818000078201294
+  },
+  {
+   "head": "limb_chondro",
+   "knob": [
+    "b1",
+    "b2"
+   ],
+   "before": {
+    "b1": 0.34,
+    "b2": 0.67
+   },
+   "after": {
+    "b1": 0.325,
+    "b2": 0.6333333333333334
+   },
+   "before_score": 3.621,
+   "after_score": 3.626
+  },
+  {
+   "head": "ct_scaffold",
+   "knob": "dv_off",
+   "before": {
+    "dv_off": 0.0
+   },
+   "after": {
+    "dv_off": 0.024005502462387085
+   },
+   "before_score": 0.248,
+   "after_score": 0.495
+  },
+  {
+   "head": "neural_wiring",
+   "knob": "n_motor",
+   "before": {
+    "n_motor": 90
+   },
+   "after": {
+    "n_motor": 40
+   },
+   "before_score": 0.775,
+   "after_score": 0.9
+  },
+  {
+   "head": "limb_muscle",
+   "knob": [
+    "dv_off",
+    "wrap"
+   ],
+   "before": {
+    "dv_off": 0.0,
+    "wrap": 0.6
+   },
+   "after": {
+    "dv_off": 0.0,
+    "wrap": 0.6
+   },
+   "before_score": 0.923,
+   "after_score": 0.923
+  },
+  {
+   "head": "tendon",
+   "knob": "radius",
+   "before": {
+    "radius": 1.0
+   },
+   "after": {
+    "radius": 0.15555555555555556
+   },
+   "before_score": 0.6,
+   "after_score": 0.938
+  }
+ ],
+ "cell_limited": [
+  "axial_skeleton (23/30 vertebrae -- needs denser axial cartilage)",
+  "part_resolved_anatomy (lift-fill masks sparse cells)"
+ ],
+ "coupled": [
+  "fate_params (differentiation_search)",
+  "limb_params (develop_search)",
+  "fore_boost (unified_embryo)",
+  "maturation (atlas_relax_search)"
+ ]
+}

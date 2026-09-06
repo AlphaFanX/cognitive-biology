@@ -124,7 +124,25 @@ def _gj_operator(pts, k=8):
 
 
 def _low_modes(L, k):
-    vals, vecs = spla.eigsh(L, k=min(k + 1, L.shape[0] - 1), sigma=-1e-8, which="LM")
+    # ROBUST low-eigenmode solve. Shift-invert near 0 is fast but can fail to converge (ArpackNoConvergence)
+    # when the head cloud is perturbed -- this has been the face-solver landmine. Try shift-invert, then
+    # plain smallest-magnitude with more iterations, then a dense eigh that cannot fail (the face Laplacian
+    # is small). The passing case is unchanged: the first path returns the same modes it always did.
+    n = L.shape[0]
+    kk = min(k + 1, n - 1)
+    ncv = min(n - 1, max(2 * kk + 1, 40))
+    vals = vecs = None
+    for kwargs in (dict(sigma=-1e-8, which="LM", maxiter=5000, ncv=ncv),
+                   dict(which="SM", maxiter=10000, ncv=min(n - 1, max(2 * kk + 1, 60)))):
+        try:
+            vals, vecs = spla.eigsh(L, k=kk, **kwargs)
+            break
+        except Exception:
+            vals = vecs = None
+    if vals is None:
+        Ld = L.toarray() if sp.issparse(L) else np.asarray(L)   # dense fallback (small face cloud)
+        w, V = np.linalg.eigh(Ld)
+        vals, vecs = w[:kk], V[:, :kk]
     o = np.argsort(vals)
     return vals[o][1:], vecs[:, o][:, 1:]                        # drop the trivial constant mode
 

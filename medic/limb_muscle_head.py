@@ -87,17 +87,51 @@ def carve(base, F, dv_off=None, wrap=None):
     return res
 
 
+# menagerie limb bone -> the MODEL PD segment (kind, segment) it corresponds to. Restricted to the pure
+# limb long bones; the girdle bones (scapula/pelvis) and all axial bones keep the bbox map, which already
+# places the shoulder/hip muscles that attach to them well. This is the SURGICAL set: the distal-limb
+# muscles were the ones the whole-body bbox affine mislocated (the forearm hangs by the hip in this pose,
+# so a global affine cannot put a forearm muscle on the forearm).
+_BONE2SEG = {"humerus": ("fore", "stylopod"), "radius-ulna": ("fore", "zeugopod"), "manus": ("fore", "autopod"),
+             "femur": ("hind", "stylopod"), "tibia-fibula": ("hind", "zeugopod"), "pes": ("hind", "autopod")}
+_SEGR = {"stylopod": (0.0, 0.34), "zeugopod": (0.34, 0.67), "autopod": (0.67, 1.01)}
+
+
+def _model_bone_point(limbs_model, bone, frac, side):
+    """A point at fraction `frac` (proximal->distal) along the MODEL's own grown limb bone. Returns None
+    for a non-limb bone or a missing limb, so the caller falls back to the bbox map for that endpoint."""
+    seg = _BONE2SEG.get(bone)
+    if seg is None or side not in ("R", "L"):
+        return None
+    lk = f"{seg[0]}-{side}"
+    lm = limbs_model.get(lk)
+    if lm is None:
+        return None
+    lo, hi = _SEGR[seg[1]]
+    tgt = lo + float(np.clip(frac, 0.0, 1.0)) * (hi - lo)          # target pdn along the whole limb
+    pdn, P = lm["pdn"], lm["P"]
+    for bw in (0.06, 0.12, 0.20):                                  # widen the band until enough cells
+        band = np.abs(pdn - tgt) < bw
+        if band.sum() >= 5:
+            return P[band].mean(0)
+    return None
+
+
 def carve_by_action_line(base, F, reg=None):
     """CT-carving by LINE OF ACTION -- the real cleavage rule. Each myotome / limb-myoblast cell cleaves to
     the muscle whose ORIGIN->INSERTION line it lies along (the Tcf4/Osr1 CT lays the cleavage planes exactly
     between adjacent action-lines). Unlike nearest-MIDPOINT (which clumps every muscle into a blob at its
     centre), nearest-SEGMENT makes each muscle SPAN from its origin bone to its insertion bone, and lets
     adjacent muscles (quadriceps/hamstrings/gluteal) partition a shared mass by which line each cell is on.
+
+    Limb-bone endpoints are resolved on the MODEL's own grown bones (carve_bones) by name + PD fraction, so a
+    forearm muscle attaches to the model's radius/ulna rather than to wherever a whole-body bbox affine sends
+    the atlas point; axial and girdle endpoints keep the bbox map.
     `reg` = an atlas_raw->model registration (medic.model_atlas_registration.register); None -> bbox fallback.
     Returns (mus_cells, assign, muscles, O, I) with O/I = origin/insertion in the MODEL frame."""
     from menagerie.targets import reference_genome
     from menagerie.skeleton import build_skeleton
-    from menagerie.muscles import build_muscles
+    from menagerie.muscles import build_muscles, MUSCLE_PLAN
     from medic.human_movie import _atlas_to_laid
     from medic.unified_embryo import FIDX
     g = reference_genome("human_male"); bones = build_skeleton(g); muscles = build_muscles(g, bones)
@@ -108,7 +142,22 @@ def carve_by_action_line(base, F, reg=None):
         a_lo, a_sp = A.min(0), np.ptp(A, 0) + 1e-9
         m_lo, m_sp = base.min(0), np.ptp(base, 0) + 1e-9
         cg = lambda P: (_atlas_to_laid(np.atleast_2d(P)) - a_lo) / a_sp * m_sp + m_lo
-    O = np.array([cg(m.origin)[0] for m in muscles]); I = np.array([cg(m.insertion)[0] for m in muscles])
+
+    # the model's OWN limb skeleton (per-cell PD fraction + bone name), to attach limb muscles correctly
+    limbs_model = carve_bones(base, F)
+    plan = {nm: (ob, of, ib, ifr) for (nm, ob, of, ib, ifr, *_rest) in MUSCLE_PLAN}
+
+    O, I = [], []
+    for m in muscles:
+        base_nm = m.name[:-2] if m.name[-2:] in (" R", " L") else m.name
+        p = plan.get(base_nm)
+        o_pt = i_pt = None
+        if p is not None:
+            o_pt = _model_bone_point(limbs_model, p[0], p[1], m.side)               # origin on the model bone
+            i_pt = _model_bone_point(limbs_model, p[2], p[3], m.side)               # insertion on the model bone
+        O.append(o_pt if o_pt is not None else cg(m.origin)[0])
+        I.append(i_pt if i_pt is not None else cg(m.insertion)[0])
+    O = np.array(O); I = np.array(I)
     mus = base[F == FIDX["Muscle"]] if "Muscle" in FIDX else base[:0]
     if not len(mus):
         return mus, np.array([], int), muscles, O, I

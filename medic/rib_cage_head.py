@@ -73,12 +73,17 @@ def build(base, F, span=None, per=26):
         vp = np.array(vent_pts)
         sdv = float(np.median(vp[:, 1]))
         x_top, x_bot = float(vp[:, 0].max()), float(vp[:, 0].min())
-        sx = np.linspace(x_bot - 0.03 * H, x_top, per)          # extend a little below for the xiphoid
-        stern = np.c_[sx, np.full(per, sdv), np.zeros(per)] + rng.normal(size=(per, 3)) * 0.004
-        af = (sx - sx.min()) / (np.ptp(sx) + 1e-9)              # 0 = inferior (xiphoid) -> 1 = superior (manubrium)
-        for nm, m in (("xiphoid", af < 0.18), ("body", (af >= 0.18) & (af < 0.80)), ("manubrium", af >= 0.80)):
-            if m.sum():
-                parts[f"sternum-{nm}"] = dict(kind="bone", part="sternum", bone=nm, side="M", P=stern[m])
+        x_lo = x_bot - 0.03 * H                                 # extend a little below for the xiphoid
+        wid = 0.020 * H                                         # sternal WIDTH (ML) -- a FLAT bar, not a line
+        # manubrium (superior) + body (long middle) + xiphoid (small inferior tip), each a proper flat plate
+        # with ~30 cells so the sub-segments are non-degenerate (the Gray's scorecard found them n<20 lines).
+        for nm, (a0, a1, wsc, nps) in (("xiphoid", (0.0, 0.16, 0.5, 22)),
+                                       ("body", (0.16, 0.80, 1.0, 40)),
+                                       ("manubrium", (0.80, 1.0, 1.5, 30))):
+            xa = x_lo + (x_top - x_lo) * (a0 + (a1 - a0) * rng.random(nps))
+            za = (rng.random(nps) - 0.5) * wid * wsc            # manubrium widest, xiphoid narrowest
+            Ps = np.c_[xa, np.full(nps, sdv), za] + rng.normal(size=(nps, 3)) * 0.003
+            parts[f"sternum-{nm}"] = dict(kind="bone", part="sternum", bone=nm, side="M", P=Ps)
     return dict(parts=parts, H=H, span=span)
 
 

@@ -11,10 +11,12 @@ from medic.unified_embryo import FIDX
 def thin_spinal_cord(base, F, ml_keep=0.30, dv_keep=0.30, nb=16):
     """Compress the Spinal Cord to a THIN tube around its own per-AP-band centre-line (it followed the spine but
     spread into a DV wedge). Keeps the cord's path + all cells; just thins ML+DV so it reads as a cord, not a wedge."""
-    if "Spinal Cord" not in FIDX:
+    from medic.subhead_program import expand_names
+    ids = [FIDX[n] for n in expand_names(["Spinal Cord"]) if n in FIDX]   # + the 4 cord-level sub-heads
+    if not ids:
         return base
     base = np.asarray(base, float).copy(); F = np.asarray(F)
-    idx = np.where(F == FIDX["Spinal Cord"])[0]
+    idx = np.where(np.isin(F, ids))[0]
     if len(idx) < 20:
         return base
     P = base[idx]; x = P[:, 0]
@@ -34,7 +36,8 @@ def thin_spinal_cord(base, F, ml_keep=0.30, dv_keep=0.30, nb=16):
 def shrink_heart(base, F, scale=0.72):
     """The heart is ~3x the liver (oversized) + bulges laterally. Scale the chambers toward their shared centroid,
     keeping the D-loop shape + the (lateralised) address."""
-    ids = [FIDX[n] for n in ("Heart", "Atrium", "Ventricle", "Outflow") if n in FIDX]
+    ids = [FIDX[n] for n in ("Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow")
+           if n in FIDX]                                   # incl the L/R ventricle relabels (heart_tube split)
     if not ids:
         return base
     base = np.asarray(base, float).copy(); F = np.asarray(F)

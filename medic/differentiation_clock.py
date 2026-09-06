@@ -68,13 +68,15 @@ FATE_PRC2 = {
     # FORMATION: they left the dorsal-midline cells uncommitted while CE dispersed them, so the spinal cord
     # never cohered (0.2% vs HESTA's 20%). The neural tube must claim its dorsal-midline column just before
     # the somite/mesoderm (0.66) does, then refine Hox identity within it -- so the whole tube unlocks at 0.68.
-    "Nervous System": 0.68, "Forebrain": 0.68, "Eye": 0.30,            # neural tube (dorsal midline)
+    "Nervous System": 0.68, "Forebrain": 0.68, "Telencephalon": 0.68, "Eye": 0.30,   # neural tube (dorsal midline)
     # brain SUBHEADS along the AP neural tube (2026-07-18): masters Otx2 (fore/mid), En1 (mid/hind
     # boundary), Gbx2 (hindbrain); they share the early neural-tube unlock (regionalised within the tube).
     "Midbrain": 0.68, "Hindbrain": 0.68, "Cerebellum": 0.66,
     "Neural Crest": 0.42,
     "Spinal Cord": 0.68,                                               # posterior neural tube (Hox refines later)
 }
+from medic.subhead_program import extend_clock as _sub_clk           # sub-head PROGRAM: children unlock with parent
+_sub_clk(FATE_PRC2)
 ANTERIOR_NEURAL = {"Forebrain", "Eye", "Nervous System"}
 POSTERIOR_NEURAL = {"Spinal Cord"}
 

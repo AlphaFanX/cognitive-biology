@@ -3,6 +3,7 @@ numpy>=1.26
 scipy>=1.11
 pandas>=2.0
 matplotlib>=3.7
+scikit-image>=0.22   # marching cubes for the closed skin surface (medic/skin_closed_surface.py)
 
 # Genomic data access (kernel construction from public tracks)
 pybigtools>=0.1

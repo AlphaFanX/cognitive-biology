@@ -95,8 +95,25 @@ def build(base, F, span=None, per=90):
         parts[f"ilium-{side}"] = dict(kind="bone", part="ilium", side=side, P=blade)
         parts[f"ischium-{side}"] = dict(kind="bone", part="ischium", side=side, P=ring[tt < 0.5])
         parts[f"pubis-{side}"] = dict(kind="bone", part="pubis", side=side, P=ring[tt >= 0.5])
-        parts[f"acetabulum-{side}"] = dict(kind="bone", part="acetabulum", side=side, P=acet[None])
+        femoral = cells[np.argmax(np.abs(cells[:, 2]))]                 # a distal-ish hindlimb point (femur dir)
+        cup = _socket_cup(acet, femoral - acet, 0.13 * span * H, 36, rng)   # a real concave hip socket
+        parts[f"acetabulum-{side}"] = dict(kind="bone", part="acetabulum", side=side,
+                                           P=np.vstack([acet[None], cup]))
     return dict(parts=parts, H=H, span=span)
+
+
+def _socket_cup(center, facing, radius, n, rng):
+    """A concave articular SOCKET (acetabulum): a shallow spherical-cap bowl opening toward `facing` (the
+    femoral head articulates on the +facing side). Fixes the n=1 socket the Gray's scorecard flagged."""
+    f = np.asarray(facing, float); f = f / (np.linalg.norm(f) + 1e-9)
+    ref = np.array([0.0, 0.0, 1.0]) if abs(f[2]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    u = np.cross(f, ref); u /= np.linalg.norm(u) + 1e-9; v = np.cross(f, u)
+    pts = []
+    for _ in range(n):
+        rr = radius * np.sqrt(rng.random()); th = rng.random() * 2 * np.pi
+        depth = 0.45 * radius * (1 - (rr / (radius + 1e-9)) ** 2)
+        pts.append(center + u * rr * np.cos(th) + v * rr * np.sin(th) - f * depth)
+    return np.array(pts)
 
 
 def _validate(res, base, F):

@@ -46,6 +46,24 @@ def _norm(P):
 
 
 # ------------------------------------------------------------------ vertebrae: complete all 30
+def _synth_vertebra(nm, c, sc, rng):
+    """Synthesise a small but proper vertebra at centre `c` (per-axis scale `sc`). Generic = a cuboidal body +
+    a dorsal spinous PROCESS (so it is non-degenerate + reads as a vertebra). The ATLAS (C1) is a bony RING
+    (no body) with a posterior tubercle; the AXIS (C2) additionally carries the DENS (odontoid peg)."""
+    dorsal = np.array([0.0, 1.0, 0.0]); ap = np.array([1.0, 0.0, 0.0])
+    if nm == "C1":                                           # ATLAS: a ring in the DV-ML plane, no body
+        th = rng.random(26) * 2 * np.pi
+        ring = c + np.c_[np.zeros(26), np.cos(th), np.sin(th)] * sc * 3.0 + rng.normal(size=(26, 3)) * sc * 0.3
+        tubercle = c + dorsal * sc[1] * 4.0 + rng.normal(size=(6, 3)) * sc * 0.4   # posterior tubercle
+        return np.vstack([ring, tubercle])
+    body = c + rng.normal(size=(20, 3)) * sc
+    spinous = c + dorsal * (np.linspace(1.5, 4.0, 10)[:, None] * sc[1]) + rng.normal(size=(10, 3)) * sc * 0.4
+    out = [body, spinous]
+    if nm == "C2":                                           # AXIS: the dens projects along the column axis
+        out.append(c + ap * (np.linspace(1.0, 4.0, 8)[:, None] * sc[0]) + rng.normal(size=(8, 3)) * sc * 0.3)
+    return np.vstack(out)
+
+
 def complete_column(base, F, rng):
     zmax = np.abs(base[:, 2]).max()
     cart = (F == FIDX["Cartilage"]) & (np.abs(base[:, 2]) < 0.18 * zmax)
@@ -62,15 +80,26 @@ def complete_column(base, F, rng):
     out_pts, out_name, out_real = [], [], []
     for i, nm in enumerate(names):
         m = cell_name == nm
-        if m.sum() >= 3:
-            out_pts.append(P[m]); out_name += [nm] * int(m.sum()); out_real += [True] * int(m.sum())
+        scale = np.array([0.01, 0.02, 0.02]) * (np.ptp(P[:, 0]) + 1e-9)
+        if m.sum() >= 20:                                    # enough real cartilage cells -> use them...
+            real = P[m]                                      # ...but the cartilage blob has no spinous PROCESS;
+            npr = int(np.clip(len(real) // 10, 12, 30))      # a spinous process scaled to the body (not so big
+            proc = real.mean(0) + np.array([0.0, 1.0, 0.0]) * (np.linspace(1.5, 4.0, npr)[:, None] * scale[1]) \
+                + rng.normal(size=(npr, 3)) * scale * 0.4    # it breaks 'blocky'); every vertebra has one
+            cells = np.vstack([real, proc])
+            out_pts.append(cells); out_name += [nm] * len(cells)
+            out_real += [True] * len(real) + [False] * len(proc)
         else:
-            # LIFT: synthesise a small centrum on the axis at this vertebra's AP level
+            # too few (or no) real cells -> build a PROPER vertebra at this level, KEEPING any real cells.
+            # Fixes the atlas/axis + sparse vertebrae that read as degenerate ~8-cell blobs (Gray's scorecard).
+            # Body + posterior spinous process; atlas (C1) = a ring, axis (C2) = body + dens.
             frac = (i + 0.5) / N_VERT
             k = order[int(np.clip(frac * (len(order) - 1), 0, len(order) - 1))]
-            c = axis[k]
-            blob = c + rng.normal(size=(8, 3)) * np.array([0.01, 0.02, 0.02]) * (np.ptp(P[:, 0]) + 1e-9)
-            out_pts.append(blob); out_name += [nm] * 8; out_real += [False] * 8
+            center = P[m].mean(0) if m.sum() > 0 else axis[k]
+            syn = _synth_vertebra(nm, center, scale, rng)
+            cells = np.vstack([P[m], syn]) if m.sum() > 0 else syn
+            out_pts.append(cells); out_name += [nm] * len(cells)
+            out_real += [True] * int(m.sum()) + [False] * len(syn)
     V = np.vstack(out_pts)
     V[:, 0] = -V[:, 0]            # UN-NEGATE AP back to the base frame. The column is built in a flipped-AP
     # frame (anterior->t=0 for naming); if it is returned flipped, warp()/kNN-to-base grabs cells at the
@@ -81,8 +110,9 @@ def complete_column(base, F, rng):
     # that encircles the spinal cord -- the vertebral canal. Without it the column is a row of centra ventral to
     # the cord and the cord does not thread it. Grow, per vertebra, a few arch points bridging its centrum toward
     # the cord at that AP level, so the cord runs through the canal (Gray's: the vertebral foramina form the canal).
-    cord_ids = [FIDX[n] for n in ("Spinal Cord", "Nervous System", "Neural tube") if n in FIDX]
-    cord = base[np.isin(F, cord_ids)] if cord_ids else base[:0]
+    from medic.subhead_program import expand_names
+    cord_ids = [FIDX[n] for n in expand_names(("Spinal Cord", "Nervous System", "Neural tube")) if n in FIDX]
+    cord = base[np.isin(F, cord_ids)] if cord_ids else base[:0]  # sub-head split: the cord levels count as cord
     if len(cord) > 8:
         Hap = np.ptp(base[:, 0]) + 1e-9
         add_pts, add_nm = [], []

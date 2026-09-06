@@ -28,7 +28,12 @@
   #bar{position:fixed;bottom:12px;left:12px;right:334px;z-index:3;display:flex;align-items:center;gap:10px;
        background:#0d1017cc;padding:8px 12px;border-radius:9px}
   button{font:13px system-ui;background:#1b2130;color:#e2e8f0;border:1px solid #33405a;border-radius:6px;padding:4px 12px;cursor:pointer}
-  button.on{background:#2b6cb0;border-color:#2b6cb0}input[type=range]{flex:1}
+  button.on{background:#2b6cb0;border-color:#2b6cb0}
+  #sliderwrap{flex:1;position:relative;padding-bottom:13px}
+  #sliderwrap input[type=range]{width:100%;margin:0;display:block}
+  #ruler{position:absolute;left:0;right:0;bottom:0;height:12px;font:10px system-ui;color:#8091a8;pointer-events:none}
+  #ruler span{position:absolute;transform:translateX(-50%);font-variant-numeric:tabular-nums}
+  #fnum{min-width:64px;text-align:right;color:#7dd3fc;font:13px system-ui;font-variant-numeric:tabular-nums}
   .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
   #key{margin-top:5px}#key span{margin-right:10px;white-space:nowrap;font-size:11px}
 
@@ -86,11 +91,17 @@
 </div>
 <div id="bar">
   <button id="play">⏸ pause</button>
-  <input id="slider" type="range" min="0" max="0" value="0" step="1">
+  <div id="sliderwrap">
+    <input id="slider" type="range" min="0" max="0" value="0" step="1">
+    <div id="ruler"></div>
+  </div>
+  <span id="fnum">0 / 0</span>
   <button id="mode" class="on">anatomy</button>
   <button id="grays">🦴 Gray's</button>
   <button id="nca">🧠 NCA+LLM</button>
   <button id="reveal">🔬 reveal</button>
+  <button id="canon">⚖ canon</button>
+  <button id="curvebtn">📈 curve</button>
   <button id="rot">↻ auto-rotate</button>
 </div>
 <div id="gplateBox"></div>
@@ -114,13 +125,15 @@ window.addEventListener('keydown',e=>{ if(e.key==='o'||e.key==='O'){ showOrgans=
 const UNC=[0.5,0.55,0.6];
 // the skin SURFACE: a translucent epidermal-boundary mesh (fixed topology; verts stream per frame). depthWrite
 // off so the internal cell cloud shows THROUGH the skin -- a body with a silhouette, not a scatter.
-function mkSkin(verts, op){
+function mkSkin(verts, op, ff){
   const n=verts.length/3, P=new Float32Array(n*3);
   for(let i=0;i<n;i++){ P[3*i]=verts[3*i+2]; P[3*i+1]=verts[3*i]; P[3*i+2]=verts[3*i+1]; }
-  if(!skinIdx){ skinIdx=[]; for(const f of DATA.skin_faces){ skinIdx.push(f[0],f[1],f[2]); } }
+  let idx;
+  if(ff){ idx=[]; for(const f of ff){ idx.push(f[0],f[1],f[2]); } }       // per-frame topology (closed surface)
+  else { if(!skinIdx){ skinIdx=[]; for(const f of DATA.skin_faces){ skinIdx.push(f[0],f[1],f[2]); } } idx=skinIdx; }
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(P,3));
-  g.setIndex(skinIdx); g.computeVertexNormals();
+  g.setIndex(idx); g.computeVertexNormals();
   const m=new THREE.MeshStandardMaterial({color:0xd8b49a, transparent:true, opacity:op,
     side:THREE.DoubleSide, roughness:0.9, metalness:0.0, depthWrite:false});
   return new THREE.Mesh(g,m);
@@ -169,13 +182,14 @@ function build(i){
   pts=[mk(bp,bc,0.013)]; if(hp.length) pts.push(mk(hp,hc,0.022));   // point-cloud cell sizes
   for(const p of pts) sc.add(p);
   if(skinMesh){ sc.remove(skinMesh); skinMesh.geometry.dispose(); skinMesh.material.dispose(); skinMesh=null; }
-  if(fr.skin && DATA.skin_faces && (fr.skin_op||0)>0.01){ skinMesh=mkSkin(fr.skin, fr.skin_op); sc.add(skinMesh); }
+  if(fr.skin && (fr.skin_f||DATA.skin_faces) && (fr.skin_op||0)>0.01){ skinMesh=mkSkin(fr.skin, fr.skin_op, fr.skin_f); sc.add(skinMesh); }
   clearOrgans();   // solid organ surfaces during the anatomy reveal (toggle with the 'o' key)
   if(showOrgans && fr.phase==='anatomy' && DATA.organ_surfaces){
     for(const os of DATA.organ_surfaces){ const o=mkOrgan(os.V, os.F, os.color, 0.85); organMeshes.push(o); sc.add(o); }
   }
-  document.getElementById('stage').textContent=fr.stage;
+  document.getElementById('stage').textContent='frame '+i+' — '+fr.stage;
   document.getElementById('slider').value=i;
+  document.getElementById('fnum').textContent=i+' / '+(nf-1);
   pA.className=fr.phase==='cloud'?'on':''; pB.className=fr.phase==='handoff'?'on':''; pC.className=fr.phase==='mesh'?'on':''; pD.className=fr.phase==='anatomy'?'on':'';
   document.getElementById('clkv').textContent=fr.t.toFixed(2)+'  ·  '+fr.phase;
   document.getElementById('clkf').style.width=Math.round(fr.t*100)+'%';
@@ -244,6 +258,12 @@ fetch(SRC).then(resp=>{
   DATA=d; vmin=d.vmin; vmax=d.vmax; nf=d.frames.length;
   if(d.display) document.querySelector('#ui b').textContent=d.display;
   document.getElementById('slider').max=nf-1;
+  // numbered play bar (Miles): ticks every 10 frames so a strange frame can be named exactly
+  { const rl=document.getElementById('ruler'); rl.innerHTML='';
+    const step=nf>220?20:10;
+    for(let k=0;k<nf;k+=step){ const s=document.createElement('span');
+      s.style.left=(100*k/(nf-1))+'%'; s.textContent=k; rl.appendChild(s); }
+    const e=document.createElement('span'); e.style.left='100%'; e.textContent=nf-1; rl.appendChild(e); }
   document.getElementById('key').innerHTML=KEY.map(k=>`<span><i class="dot" style="background:${k[1]}"></i>${k[0]}</span>`).join('');
   const R=d.R||2.0; cam.position.set(R*0.42,R*0.10,R*3.4); ctrl.target.set(0,0,0);  // front-on; pulled back so a tall figure's head+feet are not cropped
   cur=params.get('f')?Math.min(nf-1,Math.max(0,parseInt(params.get('f')))):0;
@@ -358,6 +378,73 @@ document.getElementById('grays').onclick=()=>{ if(ncaMode)exitNca(); graysMode?e
 document.getElementById('nca').onclick=()=>{ if(graysMode)exitGrays(); ncaMode?exitNca():enterNca(); };
 document.getElementById('reveal').onclick=toggleReveal;
 // ============================ end extra tabs ============================
+
+
+// ---- CANON reference (staged: Carnegie embryos -> BodyParts3D adult, beside the model) ----
+let canonOn=false, canonRefs={}, canonKey=null, canonTimer=null, canonHF=[], canonML=0, canonStages=null, canonCloudIdx=null;
+function canonBuildGrp(key,d){ const g=new THREE.Group();
+  g.add(mkGrayCloud(d.skin,[0.62,0.67,0.75],0.008,0.30));
+  for(const o of d.organs){ const c=new THREE.Color(o.color);
+    g.add(mkGrayCloud(o.xyz,[c.r,c.g,c.b],0.014,0.85)); }
+  g.visible=false; sc.add(g);
+  canonRefs[key]={grp:g,H:d.height||1,hasHeart:d.has_heart!==false,label:d.label||'canon'}; return canonRefs[key]; }
+function canonPick(){ const fr=DATA.frames[cur]; if(!fr) return 'adult';
+  const emb=canonStages?canonStages.filter(s=>!s.param):null;   // real Carnegie stages only for the cloud
+  if(fr.phase==='cloud'&&emb&&emb.length){
+    if(!canonCloudIdx){ canonCloudIdx=[]; DATA.frames.forEach((f,i)=>{ if(f.phase==='cloud') canonCloudIdx.push(i); }); }
+    const k=Math.max(0,canonCloudIdx.indexOf(cur)), n=emb.length;
+    return 'cs'+emb[Math.min(n-1,Math.floor(k/canonCloudIdx.length*n))].cs; }
+  // fetal->adolescent: the PARAMETRIC stages (allometric interpolation of the adult -- the equations of
+  // the maturation itself; no open fetal/child 3D organ atlas exists to measure against).
+  if(canonStages){ const st=(fr.stage||'').toLowerCase();
+    for(const [w,lab] of [['fetus','FETUS·param'],['newborn','NEWBORN·param'],['infant','INFANT·param'],
+                          ['adolescent','ADOL·param'],['child','CHILD·param']]){
+      if(st.indexOf(w)>=0){ const s=canonStages.find(x=>x.label===lab); if(s) return 'cs'+s.cs; } } }
+  return 'adult'; }
+function canonChip(e,fr){ const b=document.getElementById('canon'); if(!b)return;
+  const t='⚖ '+e.label; if(b.textContent!==t) b.textContent=t; }
+function canonSync(){ if(!canonOn||!DATA)return; const fr=DATA.frames[cur]; if(!fr)return;
+  const key=canonPick(); let e=canonRefs[key];
+  if(!e){ const st=canonStages&&canonStages.find(s=>'cs'+s.cs===key); if(!st)return; e=canonBuildGrp(key,st); }
+  if(key!==canonKey){ if(canonKey&&canonRefs[canonKey]) canonRefs[canonKey].grp.visible=false;
+    canonKey=key; e.grp.visible=true; }
+  canonChip(e,fr);
+  // size-match on the SKIN MESH when present (the cloud subset is shorter than the mesh).
+  const src=(fr.skin&&fr.skin.length>90)?fr.skin:fr.xyz; if(!src)return;
+  let mn=1e9,mx=-1e9; for(let i=0;i<src.length;i+=90){ const v=src[i]; if(v<mn)mn=v; if(v>mx)mx=v; }
+  const s=Math.max(0.05,(mx-mn)/e.H); e.grp.scale.setScalar(isFinite(s)?s:1);
+  // pin the reference HEART onto the model's LIVE heart cells (heartless early stages: centre-to-centre).
+  if(fr.fate&&fr.xyz){ let sa=0,sd=0,n=0;
+    if(e.hasHeart&&canonHF.length){ for(let i=0;i<fr.fate.length;i+=5){
+        if(canonHF.indexOf(fr.fate[i])>=0){sa+=fr.xyz[3*i];sd+=fr.xyz[3*i+1];n++;} } }
+    if(n<4){ sa=0;sd=0;n=0; for(let i=0;i<fr.fate.length;i+=17){ sa+=fr.xyz[3*i];sd+=fr.xyz[3*i+1];n++; } }
+    if(n>3) e.grp.position.set(canonML, sa/n, sd/n); } }
+function toggleCanon(){ canonOn=!canonOn; document.getElementById('canon').classList.toggle('on',canonOn);
+  if(canonOn){ const go=()=>{ canonSync(); if(!canonTimer)canonTimer=setInterval(canonSync,250); };
+    if(canonRefs.adult){ go(); }
+    else Promise.all([fetch('movie/canon_reference.json?v='+Date.now()).then(r=>r.json()),
+                      fetch('movie/canon_stages.json?v='+Date.now()).then(r=>r.json()).catch(()=>null)])
+      .then(([ad,st])=>{ canonHF=ad.heart_fates||[]; canonML=ad.anchor[2];
+        ad.label='ADULT'; canonBuildGrp('adult',ad);
+        canonStages=st&&st.stages?st.stages:null; go(); });
+  } else { if(canonKey&&canonRefs[canonKey]) canonRefs[canonKey].grp.visible=false; canonKey=null;
+    const b=document.getElementById('canon'); if(b) b.textContent='⚖ canon';
+    if(canonTimer){clearInterval(canonTimer);canonTimer=null;} } }
+document.getElementById('canon').onclick=toggleCanon;
+// ---- end canon reference ----
+
+
+// ---- the frame-score CURVE overlay (model vs the staged canon, whole body + organs + skin) ----
+let curveOn=false;
+function toggleCurve(){ curveOn=!curveOn; const b=document.getElementById('curvebtn'); if(b)b.classList.toggle('on',curveOn);
+  let p=document.getElementById('curvePanel');
+  if(!p){ p=document.createElement('div'); p.id='curvePanel';
+    p.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:56px;z-index:6;background:#0d1017ee;padding:8px;border-radius:10px;width:min(78vw,1100px);box-shadow:0 6px 22px #000a;display:none';
+    p.innerHTML='<img style="width:100%;border-radius:6px;display:block" src="">'; document.body.appendChild(p); }
+  if(curveOn){ p.querySelector('img').src='organ_cascade/canon_frame_score.png?v='+Date.now(); p.style.display='block'; }
+  else p.style.display='none'; }
+document.getElementById('curvebtn').onclick=toggleCurve;
+// ---- end curve overlay ----
 
 function loop(t){ requestAnimationFrame(loop);
   if(DATA&&!graysMode&&!ncaMode&&playing&&t-last>FRAME_MS){last=t;cur=(cur+1)%nf;build(cur);}

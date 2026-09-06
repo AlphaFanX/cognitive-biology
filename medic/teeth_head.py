@@ -68,10 +68,30 @@ def _arcade(arch_cells, occlusal_dir, dsgn, rng, n=N_PER_ARCH):
         ttype = QUADRANT[min(q, len(QUADRANT) - 1)]
         crown = TYPE_SIZE[ttype] * 0.02 * (np.ptp(arch_cells[:, 0]) + 1e-6)
         pos = np.array([xt, y0 + occlusal_dir * crown, zt])
-        P = pos + rng.normal(size=(10, 3)) * crown * 0.4           # a small crown cluster
+        P = pos + _crown_points(ttype, crown, occlusal_dir, rng)
         teeth.append(dict(idx=i, t=float(t), type=ttype, side=("M" if abs(t) < 1e-6 else ("R" if t > 0 else "L")),
                           pos=pos, P=P, size=TYPE_SIZE[ttype]))
     return teeth
+
+
+# per-type crown SEMI-AXES (ap, dv, ml) in crown units -- the density floor buys FORM, not just count
+# (cycle 48): each tooth was a 10-point gaussian blob, below the grays 20-cell bar and too thin for a
+# D2 row. Incisor = ML-wide chisel blade; canine = pointed cone (apex-biased); premolar = compact box;
+# molar = broad low box. Crowns only -- roots are sub-resolution and the model does not claim them.
+_CROWN_AX = {"incisor": (0.35, 1.00, 0.75), "canine": (0.50, 1.10, 0.50),
+             "premolar": (0.70, 0.80, 0.70), "molar": (1.00, 0.70, 1.00)}
+
+
+def _crown_points(ttype, crown, occlusal_dir, rng, base_n=32):
+    n = max(24, int(base_n * TYPE_SIZE[ttype]))
+    u = rng.normal(size=(n, 3))
+    u /= np.linalg.norm(u, axis=1, keepdims=True) + 1e-12
+    r = rng.random(n) ** (1 / 3)                                   # uniform in the ball
+    ax = np.array([_CROWN_AX[ttype][0], _CROWN_AX[ttype][1], _CROWN_AX[ttype][2]]) * crown
+    P = u * r[:, None] * ax
+    if ttype == "canine":                                          # the cusp: bias mass toward the apex
+        P[:, 1] = occlusal_dir * (np.abs(P[:, 1]) ** 1.4 / (ax[1] ** 0.4 + 1e-12))
+    return P
 
 
 def build(base, F, skull=None):

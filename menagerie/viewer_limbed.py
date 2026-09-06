@@ -30,7 +30,9 @@ ANAT = {"Forebrain": (0.30, 0.46, 0.95), "Eye": (0.20, 0.85, 1.00), "Nervous Sys
         "Somite": (0.96, 0.66, 0.42), "Epidermal": (0.80, 0.84, 0.88), "Hypoblast": (0.86, 0.76, 0.46),
         "Yolk Syncytial Layer": (0.90, 0.80, 0.40), "Blastodisc": (0.72, 0.74, 0.78),
         "Proliferative Like Cell": (0.66, 0.68, 0.72), "Limb Bud": (0.16, 0.86, 0.30),
-        "Heart": (0.93, 0.16, 0.22), "Otic": (1.00, 0.82, 0.20)}
+        "Heart": (0.93, 0.16, 0.22), "Otic": (1.00, 0.82, 0.20), "Liver": (0.72, 0.34, 0.62),
+        "Lung": (0.55, 0.78, 0.90), "Pancreas": (0.80, 0.82, 0.30), "Gut": (0.82, 0.60, 0.40),
+        "Rib": (0.94, 0.94, 0.86), "Kidney": (0.66, 0.28, 0.46), "Muscle": (0.86, 0.42, 0.42)}
 ANAT_LIST = [list(ANAT.get(f, (0.7, 0.72, 0.76))) for f in FATES]
 LIMB = FIDX["Limb Bud"]
 
@@ -45,6 +47,8 @@ def grow_species(g, seed=0, n_render=14000):
     Ps = species_deform(Ps, g)                    # von Baer: late species proportions
     gf = genome_limb_frame(ce)
     Ps, seg = shape(Ps, Fs, LIMB, gf["fore_ap"], gf["hind_ap"])   # tighten body+limbs + PD segments
+    from medic.basic_vertebrate_browser import flex             # SAME gentle flexure as the dev viewer
+    Ps = flex(Ps.astype(np.float32), 1.0)                       # so the menagerie body matches its pose
     if len(Ps) > n_render:
         sel = np.random.default_rng(0).choice(len(Ps), n_render, replace=False)
         Ps, Fs, seg = Ps[sel], Fs[sel], seg[sel]
@@ -82,15 +86,21 @@ const DATA=__DATA__;let mode='anat',hl=true;
 const sc=new THREE.Scene();const cam=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.01,300);
 const rn=new THREE.WebGLRenderer({antialias:true});rn.setSize(innerWidth,innerHeight);
 rn.setPixelRatio(devicePixelRatio);document.body.appendChild(rn.domElement);
-sc.add(new THREE.AmbientLight(0xffffff,1));
+sc.add(new THREE.AmbientLight(0xffffff,0.72));
+const _dl=new THREE.DirectionalLight(0xffffff,0.85);_dl.position.set(0.6,1,0.8);sc.add(_dl);
 const ct=new OrbitControls(cam,rn.domElement);ct.enableDamping=true;ct.autoRotate=true;ct.autoRotateSpeed=0.9;
 const LIMB=__LIMB__, ANAT=DATA.anat;let pts=[];
 const SEGC=[[0.12,0.45,0.92],[0.16,0.82,0.36],[0.97,0.66,0.16]];  // stylopod / zeugopod / autopod
 function acol(f){return ANAT[f]||[0.7,0.72,0.76];}
-function mk(p,c,s){const g=new THREE.BufferGeometry();
-  g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
-  g.setAttribute('color',new THREE.Float32BufferAttribute(c,3));
-  return new THREE.Points(g,new THREE.PointsMaterial({size:s,vertexColors:true,sizeAttenuation:true}));}
+// each cell = a small shaded SPHERE (GPU-instanced: one draw call for all cells)
+const _SPH=new THREE.SphereGeometry(1,7,6);
+function mk(p,c,s){const n=p.length/3;
+  const mesh=new THREE.InstancedMesh(_SPH,new THREE.MeshLambertMaterial({}),n);
+  const dm=new THREE.Object3D(),col=new THREE.Color();
+  for(let i=0;i<n;i++){dm.position.set(p[3*i],p[3*i+1],p[3*i+2]);dm.scale.setScalar(s);dm.updateMatrix();
+    mesh.setMatrixAt(i,dm.matrix);col.setRGB(c[3*i],c[3*i+1],c[3*i+2]);mesh.setColorAt(i,col);}
+  mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
+  return mesh;}
 function show(name){
   for(const p of pts){sc.remove(p);p.geometry.dispose();p.material.dispose();}
   const d=DATA.sp[name];const N=d.fate.length;const bp=[],bc=[],hp=[],hc=[];
@@ -98,13 +108,14 @@ function show(name){
     const c=(mode==='anat')?acol(d.fate[k]):[0.6,0.64,0.7];
     if(hl&&isL){const sg=SEGC[d.seg[k]]||[0.16,0.86,0.30];hp.push(d.xyz[3*k],d.xyz[3*k+1],d.xyz[3*k+2]);hc.push(sg[0],sg[1],sg[2]);}
     else{bp.push(d.xyz[3*k],d.xyz[3*k+1],d.xyz[3*k+2]);bc.push(c[0],c[1],c[2]);}}
-  pts=[mk(bp,bc,0.028)];if(hp.length)pts.push(mk(hp,hc,0.060));
+  pts=[mk(bp,bc,0.013)];if(hp.length)pts.push(mk(hp,hc,0.024));
   for(const p of pts)sc.add(p);
   let R=0;for(let k=0;k<bp.length;k+=3){R=Math.max(R,Math.hypot(bp[k],bp[k+1],bp[k+2]));}
-  cam.position.set(R*1.4,R*0.6,R*1.8);ct.target.set(0,0,0);
+  cam.position.set(R*0.15,R*0.30,R*2.1);ct.target.set(0,0,0);   // lateral view, matching the dev viewer
   const tag=d.body_plan==='finned'?'finned — NO limbs (fish)':(d.nlimb+' limb-bud cells (tetrapod)');
   document.getElementById('stat').textContent=name+'  ·  body plan '+d.body_plan+'  ·  Wnt-PCP conv_ext '+d.conv_ext+'  ·  '+tag;}
-const KEY=[['stylopod','#1f73eb'],['zeugopod','#29d15c'],['autopod','#f7a828'],['Eye','#33d8ff'],['Heart','#ee2938'],['Otic','#ffd23a']];
+const KEY=[['limb','#29d15c'],['Eye','#33d8ff'],['Heart','#ee2938'],['Ear','#ffd23a'],['Liver','#b857a3'],
+  ['Lung','#8cc7e6'],['Pancreas','#ccd14d'],['Gut','#d19a66'],['Kidney','#a8497a'],['Rib','#f0f0db'],['Muscle','#db6b6b']];
 document.getElementById('key').innerHTML=KEY.map(k=>`<span><i class="dot" style="background:${k[1]}"></i>${k[0]}</span>`).join('');
 const sel=document.getElementById('sp');
 Object.keys(DATA.sp).forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o);});
@@ -120,13 +131,14 @@ show(Object.keys(DATA.sp)[0]);
 
 
 def main():
-    species = [("basic vertebrate", Genome())]
+    # mouse FIRST (default view): the best genome-anchored organism (Jadhav mm9 + MOSTA)
+    species = [("mouse", reference_genome("mouse")),
+               ("zebrafish", reference_genome("zebrafish")),
+               ("human male", reference_genome("human_male")),
+               ("human female", reference_genome("human_female")),
+               ("basic vertebrate", Genome())]
     for sp in BIG_SEVEN:
         species.append((sp, reference_genome(sp)))
-    species.append(("human male", reference_genome("human_male")))
-    species.append(("human female", reference_genome("human_female")))
-    species.append(("mouse", reference_genome("mouse")))
-    species.append(("zebrafish", reference_genome("zebrafish")))
 
     data = {"anat": ANAT_LIST, "sp": {}}
     for label, g in species:

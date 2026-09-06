@@ -17,6 +17,7 @@ from __future__ import annotations
 import numpy as np
 
 from medic.unified_embryo import FIDX
+from medic.subhead_program import expand_names
 
 # fate -> (a1, a2): scale the 2nd/3rd principal axes vs the 1st. From medic.organ_shape_search (aspect-ok set).
 ASPECT = {
@@ -33,9 +34,12 @@ def apply(base, F):
     base = np.asarray(base, float).copy()
     F = np.asarray(F)
     for name, (a1, a2) in ASPECT.items():
-        if name not in FIDX:
+        # the sub-head program RELABELS a split parent's cells into its children (Lung -> 5 lobes, Liver ->
+        # hepatic lobes, ...), so key the organ as parent+children or the aspect silently stops firing.
+        ids = [FIDX[n] for n in expand_names([name]) if n in FIDX]
+        if not ids:
             continue
-        m = F == FIDX[name]
+        m = np.isin(F, ids)
         if m.sum() < 8:
             continue
         P = base[m]

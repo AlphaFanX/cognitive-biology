@@ -75,7 +75,14 @@ def body_electric_antinodes(P, k_modes=16, verbose=False):
     n = len(P)
     L = _laplacian(P)
     kk = min(k_modes, n - 2)
-    vv, UU = eigsh(L, k=kk, which="SM")
+    # DETERMINISTIC START (cycle 75, the regen-to-regen drift conviction; REVISED cycle 79):
+    # eigsh without v0 draws its start from numpy's per-process GLOBAL state -- on
+    # near-degenerate body modes the returned basis then flips per launch (identical-code
+    # regens differed at every mesh frame while the 9k cloud checksummed identical). The
+    # cycle-75 v0=ones was WRONG for a Laplacian: ones IS the null eigenvector (L.1=0), so
+    # ARPACK's start deflates to zero (error -9, caught at build_base 120k -- it had survived
+    # the movie regens by iteration luck). A SEEDED random vector is deterministic AND generic.
+    vv, UU = eigsh(L, k=kk, which="SM", v0=np.random.default_rng(0).standard_normal(n))
     o = np.argsort(vv); vv, UU = vv[o], UU[:, o]
     x, y, z = P[:, 0], P[:, 1], P[:, 2]
 

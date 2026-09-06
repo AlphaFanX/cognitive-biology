@@ -49,8 +49,11 @@ SHARED = {"Eye": "eye", "Heart": "heart", "Lung": "lung",   # cloud fate -> atla
           "Liver": "liver", "Pancreas": "pancreas", "Kidney": "kidney"}
 PAIRED = ["Eye", "Otic", "Lung", "Kidney"]              # organs the lateral-inhibition penalty guards
 
-RANGES = dict(trunk_e=(0.10, 0.90), dv_girth=(-0.55, 0.85), ml_girth=(0.00, 0.90),
-              head_ht0=(3.0, 6.0), head_ht1=(1.0, 5.0), limb_ext=(1.0, 1.05), leg_ext=(1.0, 3.2),
+# GUARDRAILS (2026-08-09): the free re-run collapsed to a squat FLAT slab (heads-tall 5.8, trunk_e 0.12, dv_girth
+# -0.55). Enforce the memory's known-good floors: dv_girth>=0.40 (else the body goes flat frontal), trunk_e>=0.40
+# (else the trunk is too short -> low heads-tall). Keeps the search off the degenerate optima.
+RANGES = dict(trunk_e=(0.40, 0.90), dv_girth=(0.40, 0.85), ml_girth=(0.00, 0.90),
+              head_ht0=(3.0, 6.0), head_ht1=(1.0, 5.0), limb_ext=(2.0, 2.8), leg_ext=(1.0, 3.2),
               shoulder_w=(1.0, 3.5), waist_w=(0.5, 1.0), hip_w=(1.0, 1.6))  # regional taper (Vitruvian) + split legs
 # NOTE: widening shoulder_w (3.5->5.0) did NOT raise the shoulder canon (stayed 0.23 -- it is MECHANISM-limited
 # by the girdle acromial mass, not range-limited); reverted. The last ~0.02 to canon 0.25 is closed by the
@@ -64,6 +67,7 @@ RANGES = dict(trunk_e=(0.10, 0.90), dv_girth=(-0.55, 0.85), ml_girth=(0.00, 0.90
 # (the old ML-only profile only PENALISED extension via splay -> stubby); W_SHAPE's shared ML scale ties
 # DV depth to ML width so dv_girth is constrained (it used to be free, so the search maxed it).
 W_SHAPE, W_HT, W_LIMB, W_ORG, W_CANON, W_DV = 1.0, 1.2, 0.2, 0.2, 2.0, 4.0   # W_CANON dominant = drive the Vitruvian
+W_BODY = 3.0                                             # NEW: the actual body-proportion silhouette metric (posture_silhouette, ~85%) as a dominant objective
 ANTHRO_DV = 0.15                                                   # a man's dorsoventral body depth = 0.15 of stature
 # canon (leg/arm/shoulder as fractions of height); W_LIMB (self-referential atlas span) demoted to a hint.
 
@@ -155,14 +159,25 @@ ANTHRO_SIL = [
 ]
 
 
+# THE CANONICAL HUMAN silhouette, MEASURED from the BodyParts3D full-body skin (FMA7163) -- 24-bin ML/DV
+# half-width profiles (feet->head), normalised by max ML. Replaces the hand-guessed ANTHRO_SIL, which was
+# wrong-shaped (its ML peaked near the head, feet ~0; a real human peaks at the SHOULDERS, bins 12-14, with a
+# leg/hip taper). This makes the knob-search objective the REAL human form, not a synthetic proxy.
+CANON_HUMAN_ML = [0.21, 0.20, 0.17, 0.37, 0.69, 0.72, 0.62, 0.70, 0.82, 0.82, 0.80, 0.85,
+                  1.00, 0.98, 0.94, 0.51, 0.45, 0.42, 0.43, 0.44, 0.42, 0.39, 0.35, 0.43]
+CANON_HUMAN_DV = [0.26, 0.29, 0.31, 0.29, 0.36, 0.38, 0.39, 0.39, 0.33, 0.32, 0.35, 0.47,
+                  0.39, 0.24, 0.27, 0.32, 0.29, 0.29, 0.38, 0.43, 0.39, 0.36, 0.34, 0.37]
+
+
 def _anthro_silhouette(nbin=24):
-    """The real-man trunk silhouette as (wml, wdv) 24-bin half-width profiles, normalised by the max ML half-width
-    (like _shape_profiles), so the objective drives the cloud onto a body WITH a neck/waist/hips, not the atlas blob."""
-    ap = np.array([p[0] for p in ANTHRO_SIL]); ml = np.array([p[1] for p in ANTHRO_SIL]); dv = np.array([p[2] for p in ANTHRO_SIL])
-    centers = (np.arange(nbin) + 0.5) / nbin
-    wml = np.interp(centers, ap, ml); wdv = np.interp(centers, ap, dv)
-    s = wml.max() + 1e-9
-    return wml / s, wdv / s
+    """The CANONICAL HUMAN silhouette (measured from FMA7163) as (wml, wdv) half-width profiles, normalised by
+    max ML (like _shape_profiles) -> the objective drives the cloud onto a REAL human's proportions."""
+    ml = np.array(CANON_HUMAN_ML, float); dv = np.array(CANON_HUMAN_DV, float)
+    if nbin != len(ml):
+        src = (np.arange(len(ml)) + 0.5) / len(ml); centers = (np.arange(nbin) + 0.5) / nbin
+        ml = np.interp(centers, src, ml); dv = np.interp(centers, src, dv)
+    s = ml.max() + 1e-9
+    return ml / s, dv / s
 
 
 def atlas_target():
@@ -185,6 +200,17 @@ def atlas_target():
     for cloud_name in list(addr):
         if cloud_name in ORGAN_AP_ADDRESS:
             addr[cloud_name] = (ORGAN_AP_ADDRESS[cloud_name], addr[cloud_name][1])
+    # organ DV target: the MEASURED in-situ depth from BodyParts3D (medic.bp3d_insitu_dv), replacing the hand-
+    # authored ORGAN_PLAN schematic that build_human_atlas compressed to ~0.5 for every viscus. Same whole-body
+    # convention as _organ_addr on our model (spine dorsal = high fraction). The dv_spread head places the organs
+    # there in build_base; scoring against the same measured target keeps the objective from fighting the mechanism.
+    try:
+        _meas = json.load(open("data/organ_cascade/bp3d_insitu_dv.json"))["organs"]
+        for cloud_name in list(addr):
+            if cloud_name in _meas:
+                addr[cloud_name] = (addr[cloud_name][0], float(_meas[cloud_name]["dv_wholebody"]))
+    except Exception:
+        pass
     return dict(wml=wml_a, wdv=wdv_a, arm=arm_a, leg=leg_a, addr=addr)
 
 
@@ -195,11 +221,11 @@ def mature_with(base, F, knobs, f=1.0):
     Q = mature_cloud(base, F, f, knobs)
     t = 0.55 + 0.45 * f
     Q = grow_limbs(Q, F == LIMB, _limb_grow_model(t, knobs["limb_ext"]),
-                   _limb_grow_model(t, knobs.get("leg_ext", knobs["limb_ext"])))
+                   _limb_grow_model(t, knobs.get("leg_ext", knobs["limb_ext"])), pose=f)  # match the movie adult (legs stand, arms Vitruvian)
     return Q * ((0.9 + (3.2 - 0.9) * f ** 1.2) / _long_axis_len(Q))
 
 
-def _penalty(m, base_aspect):
+def _penalty(m, base_aspect, heads_tall=None):
     """Mechanism guard: the search cannot trade a mechanism for a better atlas fit."""
     pen = 0.0
     pen += 8.0 * max(0, m["n_components"] - 1)                     # integrin/ECM continuity (one continuum)
@@ -207,6 +233,12 @@ def _penalty(m, base_aspect):
         if not m["organs"].get(n, {}).get("bilateral"):
             pen += 1.5
     pen += 6.0 * max(0.0, 0.80 * base_aspect - m["aspect"])       # convergent extension (axial elongation)
+    # HEADS-TALL GUARDRAIL (2026-08-09): the soft W_HT term (1.2) is dwarfed by W_DV/W_BODY/W_CANON, so the search
+    # let heads-tall leak UP to 8.5 (the RANGES floors only cap the squat-slab collapse, not a too-tall figure).
+    # Enforce the canonical band as a NON-TRADEABLE guard here: free within 7.0-8.0, stiff outside (like the
+    # continuity/bilaterality guards) so the silhouette fit cannot buy a giraffe-tall or dwarf body.
+    if heads_tall is not None:
+        pen += 6.0 * max(0.0, abs(heads_tall - HT_TARGET) - 0.5)
     return pen
 
 
@@ -216,10 +248,13 @@ def objective(base, F, knobs, tgt, base_aspect):
     trunk = ~np.isin(F, LIMB_IDS)
     wml_c, wdv_c = _shape_profiles(Q, trunk)
     arm_c, leg_c = _limb_span(Q, ~trunk)
+    ht = _heads_tall(Q, F)
     s = W_SHAPE * float(np.mean(np.abs(wml_c - tgt["wml"])) + np.mean(np.abs(wdv_c - tgt["wdv"])))
-    s += W_HT * abs(_heads_tall(Q, F) - HT_TARGET) / HT_TARGET
+    s += W_HT * abs(ht - HT_TARGET) / HT_TARGET
     s += W_LIMB * (abs(arm_c - tgt["arm"]) + abs(leg_c - tgt["leg"]))
     s += W_CANON * _canon_loss(Q, F)                              # the Vitruvian canon (leg/arm/shoulder over H)
+    from medic.posture_silhouette import score as _body_score    # the reported body-proportion metric (arms excluded BY FATE)
+    s += W_BODY * (1.0 - _body_score(Q, F)["iou"])               # directly drive the body proportion up
     # ANTHROPOMETRIC DV DEPTH: drive dv_girth so the CHEST band's dorsoventral depth = 0.145*stature (a real man).
     # Target the chest BAND, not the global max: the regional anthropometric envelope in mature_cloud caps the
     # head/neck hump separately, so targeting the max here would make dv_girth over-thin the chest.
@@ -233,7 +268,7 @@ def objective(base, F, knobs, tgt, base_aspect):
         o = m["organs"].get(name, {})
         if o.get("sprouted"):
             s += W_ORG * (abs(o["ap"] - apa) + abs(o["dv"] - dva))
-    s += _penalty(m, base_aspect)
+    s += _penalty(m, base_aspect, heads_tall=ht)
     return float(s), m
 
 

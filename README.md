@@ -24,6 +24,12 @@ framework described in the paper. It is **not** the full working tree — only
 the modules that implement the mechanisms and generate the results discussed in
 the manuscript, with no API keys, credentials, or large private data.
 
+Working state 2026-09-06: cycles 1–81 of the look→fix-genomically→look-again
+loop; frozen benchmark suite v1.3 (grays 0.967, canonical D2 76.3, silhouette
+83.3, integrity 13/13); staged canonical curve mean 90.1%; FMA completion
+ledger 1,090 nodes, 24% coded / 20% completed; determinism at 120k cells still
+open (see the notes in `medic/_phase_bisect.py`).
+
 It also contains the code for eight companion papers: the design paper,
 *Cognitive Biology: Perceptrons and Morphogen Primordia* (see
 [Perceptrons and morphogen primordia](#perceptrons-and-morphogen-primordia-companion-paper));

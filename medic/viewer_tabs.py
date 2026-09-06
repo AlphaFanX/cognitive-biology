@@ -145,6 +145,123 @@ document.getElementById('reveal').onclick=toggleReveal;
 // ============================ end extra tabs ============================
 """
 
+# ---- the CANON reference: the canonical human beside the model, in 3D, STAGED -- Carnegie embryos ----
+# ---- (Amsterdam atlas) across the cloud phase, the BodyParts3D adult from the handoff on; sized to ----
+# ---- the body every frame, heart pinned onto the model's live heart cells.                        ----
+CANON_JS = r"""
+// ---- CANON reference (staged: Carnegie embryos -> BodyParts3D adult, beside the model) ----
+let canonOn=false, canonRefs={}, canonKey=null, canonTimer=null, canonHF=[], canonML=0, canonStages=null, canonCloudIdx=null;
+function canonBuildGrp(key,d){ const g=new THREE.Group();
+  g.add(mkGrayCloud(d.skin,[0.62,0.67,0.75],0.008,0.30));
+  for(const o of d.organs){ const c=new THREE.Color(o.color);
+    g.add(mkGrayCloud(o.xyz,[c.r,c.g,c.b],0.014,0.85)); }
+  g.visible=false; sc.add(g);
+  canonRefs[key]={grp:g,H:d.height||1,hasHeart:d.has_heart!==false,label:d.label||'canon'}; return canonRefs[key]; }
+function canonPick(){ const fr=DATA.frames[cur]; if(!fr) return 'adult';
+  const emb=canonStages?canonStages.filter(s=>!s.param):null;   // real Carnegie stages only for the cloud
+  if(fr.phase==='cloud'&&emb&&emb.length){
+    if(!canonCloudIdx){ canonCloudIdx=[]; DATA.frames.forEach((f,i)=>{ if(f.phase==='cloud') canonCloudIdx.push(i); }); }
+    const k=Math.max(0,canonCloudIdx.indexOf(cur)), n=emb.length;
+    return 'cs'+emb[Math.min(n-1,Math.floor(k/canonCloudIdx.length*n))].cs; }
+  // fetal->adolescent: the PARAMETRIC stages (allometric interpolation of the adult -- the equations of
+  // the maturation itself; no open fetal/child 3D organ atlas exists to measure against).
+  if(canonStages){ const st=(fr.stage||'').toLowerCase();
+    for(const [w,lab] of [['fetus','FETUS·param'],['newborn','NEWBORN·param'],['infant','INFANT·param'],
+                          ['adolescent','ADOL·param'],['child','CHILD·param']]){
+      if(st.indexOf(w)>=0){ const s=canonStages.find(x=>x.label===lab); if(s) return 'cs'+s.cs; } } }
+  return 'adult'; }
+function canonChip(e,fr){ const b=document.getElementById('canon'); if(!b)return;
+  const t='⚖ '+e.label; if(b.textContent!==t) b.textContent=t; }
+function canonSync(){ if(!canonOn||!DATA)return; const fr=DATA.frames[cur]; if(!fr)return;
+  const key=canonPick(); let e=canonRefs[key];
+  if(!e){ const st=canonStages&&canonStages.find(s=>'cs'+s.cs===key); if(!st)return; e=canonBuildGrp(key,st); }
+  if(key!==canonKey){ if(canonKey&&canonRefs[canonKey]) canonRefs[canonKey].grp.visible=false;
+    canonKey=key; e.grp.visible=true; }
+  canonChip(e,fr);
+  // size-match on the SKIN MESH when present (the cloud subset is shorter than the mesh).
+  const src=(fr.skin&&fr.skin.length>90)?fr.skin:fr.xyz; if(!src)return;
+  let mn=1e9,mx=-1e9; for(let i=0;i<src.length;i+=90){ const v=src[i]; if(v<mn)mn=v; if(v>mx)mx=v; }
+  const s=Math.max(0.05,(mx-mn)/e.H); e.grp.scale.setScalar(isFinite(s)?s:1);
+  // pin the reference HEART onto the model's LIVE heart cells (heartless early stages: centre-to-centre).
+  if(fr.fate&&fr.xyz){ let sa=0,sd=0,n=0;
+    if(e.hasHeart&&canonHF.length){ for(let i=0;i<fr.fate.length;i+=5){
+        if(canonHF.indexOf(fr.fate[i])>=0){sa+=fr.xyz[3*i];sd+=fr.xyz[3*i+1];n++;} } }
+    if(n<4){ sa=0;sd=0;n=0; for(let i=0;i<fr.fate.length;i+=17){ sa+=fr.xyz[3*i];sd+=fr.xyz[3*i+1];n++; } }
+    if(n>3) e.grp.position.set(canonML, sa/n, sd/n); } }
+function toggleCanon(){ canonOn=!canonOn; document.getElementById('canon').classList.toggle('on',canonOn);
+  if(canonOn){ const go=()=>{ canonSync(); if(!canonTimer)canonTimer=setInterval(canonSync,250); };
+    if(canonRefs.adult){ go(); }
+    else Promise.all([fetch('movie/canon_reference.json?v='+Date.now()).then(r=>r.json()),
+                      fetch('movie/canon_stages.json?v='+Date.now()).then(r=>r.json()).catch(()=>null)])
+      .then(([ad,st])=>{ canonHF=ad.heart_fates||[]; canonML=ad.anchor[2];
+        ad.label='ADULT'; canonBuildGrp('adult',ad);
+        canonStages=st&&st.stages?st.stages:null; go(); });
+  } else { if(canonKey&&canonRefs[canonKey]) canonRefs[canonKey].grp.visible=false; canonKey=null;
+    const b=document.getElementById('canon'); if(b) b.textContent='⚖ canon';
+    if(canonTimer){clearInterval(canonTimer);canonTimer=null;} } }
+document.getElementById('canon').onclick=toggleCanon;
+// ---- end canon reference ----
+"""
+
+
+CURVE_JS = r"""
+// ---- the frame-score CURVE overlay (model vs the staged canon, whole body + organs + skin) ----
+let curveOn=false;
+function toggleCurve(){ curveOn=!curveOn; const b=document.getElementById('curvebtn'); if(b)b.classList.toggle('on',curveOn);
+  let p=document.getElementById('curvePanel');
+  if(!p){ p=document.createElement('div'); p.id='curvePanel';
+    p.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:56px;z-index:6;background:#0d1017ee;padding:8px;border-radius:10px;width:min(78vw,1100px);box-shadow:0 6px 22px #000a;display:none';
+    p.innerHTML='<img style="width:100%;border-radius:6px;display:block" src="">'; document.body.appendChild(p); }
+  if(curveOn){ p.querySelector('img').src='organ_cascade/canon_frame_score.png?v='+Date.now(); p.style.display='block'; }
+  else p.style.display='none'; }
+document.getElementById('curvebtn').onclick=toggleCurve;
+// ---- end curve overlay ----
+"""
+
+
+def augment_curve(path):
+    """Add the '📈 curve' toggle: the canon_frame_score.png overlay inside the viewer."""
+    p = Path(path); html = p.read_text(encoding="utf-8")
+    if 'id="curvebtn"' in html:
+        print("  [viewer_tabs] curve toggle already present"); return
+    reps = [
+        ('<button id="canon">⚖ canon</button>',
+         '<button id="canon">⚖ canon</button>\n  <button id="curvebtn">📈 curve</button>'),
+        ('function loop(t){ requestAnimationFrame(loop);',
+         CURVE_JS + '\nfunction loop(t){ requestAnimationFrame(loop);'),
+    ]
+    n_ok = 0
+    for old, new in reps:
+        if old in html:
+            html = html.replace(old, new, 1); n_ok += 1
+        else:
+            print(f"  [viewer_tabs] curve anchor NOT found: {old[:50]}...")
+    p.write_text(html, encoding="utf-8")
+    print(f"  [viewer_tabs] curve toggle: {n_ok}/{len(reps)} patches applied")
+
+
+def augment_canon(path):
+    """Add the '⚖ canon' toggle: the canonical human (data/movie/canon_reference.json, from
+    medic.canon_reference_export) standing beside the model in 3D, size-matched to every frame.
+    Separate from augment() so it can also be applied standalone to an already-augmented viewer."""
+    p = Path(path); html = p.read_text(encoding="utf-8")
+    if 'id="canon"' in html:
+        print("  [viewer_tabs] canon toggle already present"); return
+    reps = [
+        ('<button id="reveal">🔬 reveal</button>',
+         '<button id="reveal">🔬 reveal</button>\n  <button id="canon">⚖ canon</button>'),
+        ('function loop(t){ requestAnimationFrame(loop);',
+         CANON_JS + '\nfunction loop(t){ requestAnimationFrame(loop);'),
+    ]
+    n_ok = 0
+    for old, new in reps:
+        if old in html:
+            html = html.replace(old, new, 1); n_ok += 1
+        else:
+            print(f"  [viewer_tabs] canon anchor NOT found: {old[:50]}...")
+    p.write_text(html, encoding="utf-8")
+    print(f"  [viewer_tabs] canon toggle: {n_ok}/{len(reps)} patches applied")
+
 
 def augment(path):
     p = Path(path); html = p.read_text(encoding="utf-8")
@@ -183,6 +300,8 @@ def augment(path):
             print(f"  [viewer_tabs] anchor NOT found (skipped): {old[:60]}...")
     p.write_text(html, encoding="utf-8")
     print(f"  [viewer_tabs] augmented {p.name}: {n_ok}/{len(reps)} patches applied")
+    augment_canon(path)                                    # the canon toggle survives regens too
+    augment_curve(path)                                    # the curve overlay survives regens too
 
 
 if __name__ == "__main__":

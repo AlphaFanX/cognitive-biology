@@ -251,11 +251,9 @@ def main():
     eyec = np.tile(to_rgb("#1f77b4"), (len(eyes), 1))
     orgc = np.vstack([np.tile(to_rgb(ocol[n]), (len(v), 1)) for n, v in organs.items()])
     allc = np.vstack([bodyc, limbc, eyec, orgc])
-    write_viewer(allp, allc, "data/vertebrate_growth_3d.html",
-                 f"Vertebrate, {total} cells: body + limbs + organs (rotatable)",
-                 "Grown by the Paper-6 division engine; symmetry from the electric frame + lateral inhibition; "
-                 "limbs (brown) at the Hox levels; organs = 4-chambered heart (red), hollow gut (orange), sinuses (cyan). "
-                 "Genome-derived: axes, symmetry, Hox limb/organ levels, growth law. Not derived: limb/organ geometry, DV/LR detail, scale, and the potassium anchor.")
+    # NOTE: data/vertebrate_growth_3d.html is now the MULTI-SPECIES menagerie viewer, owned by
+    # menagerie/viewer.py. The single-species write below is disabled so it is not clobbered.
+    # write_viewer(allp, allc, "data/vertebrate_growth_3d.html", ...)
 
 
 if __name__ == "__main__":

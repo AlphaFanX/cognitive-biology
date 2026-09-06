@@ -28,7 +28,26 @@ ANAT = {"Forebrain": (0.30, 0.46, 0.95), "Eye": (0.20, 0.85, 1.00), "Nervous Sys
         "Somite": (0.96, 0.66, 0.42), "Epidermal": (0.82, 0.86, 0.90), "Hypoblast": (0.86, 0.76, 0.46),
         "Yolk Syncytial Layer": (0.90, 0.80, 0.40), "Blastodisc": (0.72, 0.74, 0.78),
         "Proliferative Like Cell": (0.66, 0.68, 0.72), "Limb Bud": (0.28, 0.86, 0.46),
-        "Heart": (0.93, 0.16, 0.22), "Otic": (1.00, 0.82, 0.20)}
+        "Heart": (0.93, 0.16, 0.22), "Otic": (1.00, 0.82, 0.20), "Liver": (0.72, 0.34, 0.62),
+        "Lung": (0.55, 0.78, 0.90), "Pancreas": (0.80, 0.82, 0.30), "Gut": (0.82, 0.60, 0.40),
+        "Rib": (0.94, 0.94, 0.86), "Kidney": (0.66, 0.28, 0.46), "Muscle": (0.86, 0.42, 0.42),
+        "Notochord": (0.60, 0.82, 0.72), "Skin": (0.96, 0.82, 0.74),
+        "Cartilage": (0.80, 0.86, 0.92), "DRG": (0.72, 0.30, 0.90),
+        "Sympathetic": (0.90, 0.45, 0.85), "Vessel": (0.80, 0.10, 0.20),
+        # leaf heads added 2026-07-18
+        "Meninges": (0.58, 0.50, 0.78), "Connective": (0.78, 0.70, 0.58), "Jaw": (0.86, 0.62, 0.70),
+        "Choroid": (0.40, 0.78, 0.86), "Gonad": (0.90, 0.52, 0.60),
+        # brain subheads (blue family, anterior -> posterior gets deeper)
+        "Midbrain": (0.34, 0.52, 0.94), "Hindbrain": (0.40, 0.62, 0.90), "Cerebellum": (0.52, 0.72, 0.94),
+        # 6 remaining MOSTA heads
+        "Mesothelium": (0.66, 0.74, 0.68), "Mesentery": (0.72, 0.66, 0.52), "Mucosa": (0.88, 0.72, 0.52),
+        "HeadMes": (0.70, 0.62, 0.52), "Branchial": (0.80, 0.56, 0.62), "Blood": (0.74, 0.10, 0.14),
+        # organ subheads + new organ heads (07-18)
+        "Atrium": (0.95, 0.34, 0.40), "Ventricle": (0.85, 0.12, 0.18), "Outflow": (0.99, 0.52, 0.44),
+        "LiverHaem": (0.80, 0.20, 0.34), "Foregut": (0.88, 0.68, 0.44), "Hindgut": (0.68, 0.48, 0.32),
+        "Nephron": (0.58, 0.30, 0.54), "Retina": (0.24, 0.76, 0.86), "Adrenal": (0.94, 0.72, 0.30),
+        "Thymus": (0.76, 0.82, 0.58), "Spleen": (0.58, 0.16, 0.30),
+        "Bladder": (0.86, 0.76, 0.56), "Adipose": (0.96, 0.86, 0.54), "OlfactoryBulb": (0.42, 0.56, 0.92)}
 ANAT_LIST = [list(ANAT[f]) for f in FATES]
 
 
@@ -70,8 +89,9 @@ def shape_limbs(Q, fate, f, limb_id):
 
 
 def flex(Q, f):
-    """Late cephalo-caudal flexure: curl the AP axis into a C, ramping over the second half."""
-    bend = np.radians(64.0) * float(np.clip((f - 0.42) / 0.58, 0, 1))
+    """Late cephalo-caudal flexure: a GENTLE cephalic curve (not a sharp C) so the organs
+    read as a clean anteroposterior sequence ALONG the trunk instead of a folded boomerang."""
+    bend = np.radians(24.0) * float(np.clip((f - 0.42) / 0.58, 0, 1))
     if bend < 1e-6:
         return Q
     x, y, z = Q[:, 0], Q[:, 1], Q[:, 2]
@@ -109,7 +129,15 @@ def _frame(Ps):
     return apr, lrm, cLR
 
 
-def width_sweep(Ps, c, scale, n_w=7, n_pts=8000):
+# genome-derived fore/hind AP levels (fossil-record Hox enhancers) -- same as the main sim
+try:
+    from medic.limb_genome_frame import genome_limb_frame as _glf
+    _FORE_AP, _HIND_AP = _glf(1.0)["fore_ap"], _glf(1.0)["hind_ap"]
+except Exception:
+    _FORE_AP, _HIND_AP = 0.294, 0.755
+
+
+def width_sweep(Ps, c, scale, n_w=7, n_pts=20000):
     """Precompute the FISH->TETRAPOD (amphibian) sweep: thin -> wide body; at each width, recompute
     the electric-body frame and mark the limb cells (Hox AP level x LR-mode antinode). Thin body:
     no LR eigenmode -> no separated limbs; wide body: LR mode present -> four limbs on the antinodes."""
@@ -122,9 +150,20 @@ def width_sweep(Ps, c, scale, n_w=7, n_pts=8000):
         P = base.copy(); P[:, 2] *= s
         apr, lrm, cLR = _frame(P)
         dv = (P[:, 1] - P[:, 1].min()) / (np.ptp(P[:, 1]) + 1e-9)
-        hox = np.exp(-((apr - 0.20) / 0.05) ** 2) + np.exp(-((apr - 0.44) / 0.05) ** 2)
-        limb = (np.abs(lrm) > 0.45) & (dv >= 0.26) & (dv <= 0.62) & (hox > 0.4)
+        hox = np.exp(-((apr - _FORE_AP) / 0.06) ** 2) + np.exp(-((apr - _HIND_AP) / 0.06) ** 2)
+        # limbs ONLY where a genuine LR bilateral eigenmode exists (cLR high): a thin fish has
+        # no LR mode (cLR~0) -> limbless, however wide the |lrm| noise looks; a wide tetrapod does.
+        lr_present = cLR > 0.35
+        limb = lr_present & (np.abs(lrm) > 0.45) & (dv >= 0.26) & (dv <= 0.62) & (hox > 0.4)
         Q = (P - P.mean(0)) * scale
+        # GROW the marked limb cells into visible BUDS (else they are flat coloured patches on the
+        # trunk and read as specks): push them laterally off the midline + a touch ventrally, scaled
+        # by how strong the LR mode is -- so as you widen the body the buds also physically emerge.
+        if limb.any():
+            grow = 0.55 * min(1.0, cLR)
+            sgn = np.sign(Q[:, 2] + 1e-9)
+            Q[limb, 2] += sgn[limb] * grow
+            Q[limb, 1] -= 0.30 * grow
         frames.append(dict(w=round(float(s), 2), lrcorr=round(float(cLR), 2),
                            xyz=[round(float(x), 3) for x in Q.ravel()],
                            limb=[int(x) for x in limb]))
@@ -132,46 +171,85 @@ def width_sweep(Ps, c, scale, n_w=7, n_pts=8000):
     return [round(float(x), 2) for x in fracs], frames
 
 
+# the width slider now DRIVES the movie: grow the full development at several widths
+# (fish -> tetrapod). convergent_ext high = strong Wnt-PCP = narrow = fish; low = wide = tetrapod.
+WIDTH_CE = [5.5, 2.4, 1.5, 1.0]        # fish (narrow, limbless at 26k) ... tetrapod (wide)
+NE_W = 26000                           # cells per width-movie (smaller than N_END so 4 movies fit)
+RENDER_W = 5200
+
+
 def export():
-    print(f"growing basic vertebrate: 1 cell -> {N_END} cells, WITH limb + organ buds ...")
-    frames, _ = simulate(use_ecm=True, seed=0, n_start=1, n_end=N_END, limb_buds=True,
-                         convergent_ext=1.0, verbose=True)
-    sym = [_symmetrize(P, V, F) for (_, _, _, P, V, F) in frames]
-    Pf = sym[-1][0]
+    from medic.limb_genome_frame import genome_limb_frame
+    LIMB = FIDX["Limb Bud"]
+    raws = []
+    for ce in WIDTH_CE:
+        print(f"growing development at convergent_ext={ce} (pcp={genome_limb_frame(ce)['pcp']:.2f}) ...")
+        frames, _ = simulate(use_ecm=True, seed=0, n_start=1, n_end=NE_W, limb_buds=True,
+                             convergent_ext=ce)
+        sym = [_symmetrize(P, V, F) for (_, _, _, P, V, F) in frames]
+        raws.append((ce, frames, sym))
+
+    # shared center + scale from the widest (tetrapod, last) so every width sits in one frame
+    Pf = raws[-1][2][-1][0]
     c = Pf.mean(0); c[2] = 0.0
     scale = 1.7 / (0.5 * max(np.ptp(Pf[:, 0]), np.ptp(Pf[:, 1]), np.ptp(Pf[:, 2])) + 1e-9)
+    procs = []
+    for ce, frames, sym in raws:
+        nfr = len(frames)
+        procs.append([flex(shape_limbs((Ps - c) * scale, Fs, fi / (nfr - 1), LIMB), fi / (nfr - 1))
+                      for fi, (Ps, _, Fs) in enumerate(sym)])
+    cc = procs[-1][-1].mean(0)                                   # common recentre (tetrapod)
+    R = max(float(np.abs(p[-1] - cc).max()) for p in procs)
 
-    nfr = len(frames)
-    LIMB = FIDX["Limb Bud"]
-    proc = []
-    for fi, (Ps, _, Fs) in enumerate(sym):
-        f = fi / (nfr - 1)
-        Q = shape_limbs((Ps - c) * scale, Fs, f, LIMB)
-        proc.append(flex(Q, f))
-    cc = proc[-1].mean(0)
-    R = float(np.abs(proc[-1] - cc).max())
-    rng = np.random.default_rng(0)
+    HI_FATES = set(FIDX[n] for n in ("Limb Bud", "Eye", "Heart", "Otic", "Liver", "Lung",
+                                     "Pancreas", "Gut", "Rib", "Kidney", "Muscle",
+                                     "Cartilage", "DRG", "Sympathetic", "Vessel",
+                                     "Jaw", "Choroid", "Gonad", "Meninges",
+                                     "Branchial", "Blood", "Mesentery", "Mucosa",
+                                     "Atrium", "Ventricle", "Outflow", "LiverHaem", "Foregut", "Hindgut",
+                                     "Nephron", "Retina", "Adrenal", "Thymus", "Spleen",
+                                     "Bladder", "Adipose", "OlfactoryBulb"))
+    movies = []
+    for (ce, frames, sym), proc in zip(raws, procs):
+        rng = np.random.default_rng(0)
+        limbN = int((sym[-1][2] == LIMB).sum())
+        out = []
+        for fi, ((born, t_hpf, prc2, _, _, _), (Ps, Vs, Fs)) in enumerate(zip(frames, sym)):
+            Q = proc[fi] - cc; n = len(Q)
+            if n > RENDER_W:
+                # NEVER subsample organ/limb cells away (else sparse posterior organs vanish):
+                # keep all highlight cells, subsample only the background to fill the budget.
+                is_hi = np.isin(Fs, list(HI_FATES))
+                hi_i = np.where(is_hi)[0]; bg_i = np.where(~is_hi)[0]
+                keep_bg = max(0, min(len(bg_i), RENDER_W - len(hi_i)))
+                sel = np.concatenate([hi_i, rng.choice(bg_i, keep_bg, replace=False)])
+                Q, Vs, Fs = Q[sel], Vs[sel], Fs[sel]
+            out.append(dict(stage=f"N = {born:,} cells   ·   {t_hpf:.0f} hpf   ·   PRC2 {prc2:.2f}",
+                            xyz=[round(float(x), 2) for x in Q.ravel()],
+                            vm=[round(float(x)) for x in Vs],
+                            fate=[int(x) for x in Fs]))
+        pcp = genome_limb_frame(ce)["pcp"]
+        kind = "fish (limbless)" if limbN < 20 else "tetrapod"
+        movies.append(dict(ce=round(float(ce), 2), pcp=round(float(pcp), 2),
+                           limbN=limbN, kind=kind, frames=out))
+        print(f"  -> ce={ce} pcp={pcp:.2f}: {limbN} limb cells ({kind})")
 
-    out = []
-    for fi, ((born, t_hpf, prc2, _, _, _), (Ps, Vs, Fs)) in enumerate(zip(frames, sym)):
-        Q = proc[fi] - cc
-        n = len(Q)
-        if n > N_RENDER:
-            sel = rng.choice(n, N_RENDER, replace=False)
-            Q, Vs, Fs = Q[sel], Vs[sel], Fs[sel]
-        out.append(dict(stage=f"N = {born:,} cells   ·   {t_hpf:.0f} hpf   ·   PRC2 {prc2:.2f}",
-                        xyz=[round(float(x), 3) for x in Q.ravel()],
-                        vm=[round(float(x), 1) for x in Vs],
-                        fate=[int(x) for x in Fs]))
-    print("computing the amphibian width sweep (fish -> tetrapod) ...")
-    wfracs, wframes = width_sweep(sym[-1][0], c, scale)
-    doc = dict(display="Basic vertebrate · grown from one cell (NCA + LGM, 4 heads + limb & organ buds)",
+    doc = dict(display="Basic vertebrate · grown from one cell (NCA + LGM) · width drives development",
                vmin=VMIN, vmax=VMAX, R=round(R, 3), anat=ANAT_LIST,
-               hi=[FIDX[n] for n in ("Limb Bud", "Eye", "Heart", "Otic")],
-               width=dict(fracs=wfracs, frames=wframes), frames=out)
+               hi=[FIDX[n] for n in ("Limb Bud", "Eye", "Heart", "Otic", "Liver", "Lung",
+                                     "Pancreas", "Gut", "Rib", "Kidney", "Muscle", "Notochord",
+                                     "Cartilage", "DRG", "Sympathetic", "Vessel",
+                                     "Jaw", "Choroid", "Gonad", "Meninges",
+                                     "Branchial", "Blood", "Mesentery", "Mucosa", "Mesothelium", "HeadMes",
+                                     "Atrium", "Ventricle", "Outflow", "LiverHaem", "Foregut", "Hindgut",
+                                     "Nephron", "Retina", "Adrenal", "Thymus", "Spleen",
+                                     "Bladder", "Adipose", "OlfactoryBulb")],
+               skin=FIDX["Skin"],
+               movies=movies)
     JSON.parent.mkdir(parents=True, exist_ok=True)
     json.dump(doc, open(JSON, "w"))
-    print(f"saved {JSON}  ({len(out)} frames, {JSON.stat().st_size/1e6:.1f} MB)")
+    print(f"saved {JSON}  ({len(movies)} width-movies x {len(movies[0]['frames'])} frames, "
+          f"{JSON.stat().st_size/1e6:.1f} MB)")
     HTML.write_text(VIEWER, encoding="utf-8")
     print(f"saved {HTML}")
 
@@ -197,11 +275,12 @@ VIEWER = """<!doctype html><html><head><meta charset="utf-8"><title>Basic verteb
 <div id="stage">loading…</div></div>
 <div id="wbar"><span style="color:#8aa0b4;white-space:nowrap">body width — fish → tetrapod:</span>
   <input id="wslider" type="range" min="0" max="0" value="0" step="1">
-  <span id="wlabel" style="color:#7dd3fc;white-space:nowrap">drag to widen the body → the limbs separate</span></div>
+  <span id="wlabel" style="color:#7dd3fc;white-space:nowrap">drag to widen the body → limbs emerge in the SAME development</span></div>
 <div id="bar">
   <button id="play">⏸ pause</button>
   <input id="slider" type="range" min="0" max="0" value="0" step="1">
   <button id="mode" class="on">anatomy</button>
+  <button id="skinb" class="on">skin</button>
   <button id="rot">↻ auto-rotate</button>
 </div>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -215,7 +294,8 @@ const sc=new THREE.Scene();
 const cam=new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 500);
 const rn=new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
 rn.setSize(innerWidth,innerHeight); rn.setPixelRatio(devicePixelRatio); document.body.appendChild(rn.domElement);
-sc.add(new THREE.AmbientLight(0xffffff,1));
+sc.add(new THREE.AmbientLight(0xffffff,0.72));
+const _dl=new THREE.DirectionalLight(0xffffff,0.85); _dl.position.set(0.6,1,0.8); sc.add(_dl);
 const ctrl=new OrbitControls(cam, rn.domElement); ctrl.enableDamping=true; ctrl.autoRotateSpeed=1.1;
 let DATA=null, pts=[], vmin=0, vmax=1, nf=0;
 const UNC=[0.5,0.55,0.6];
@@ -224,63 +304,82 @@ function vcol(vm){ let t=(vm-vmin)/(vmax-vmin+1e-9); t=Math.max(0,Math.min(1,t))
   if(t<0.5){let u=t*2;return[a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u,a[2]+(b[2]-a[2])*u];}
   let u=(t-0.5)*2;return[b[0]+(c[0]-b[0])*u,b[1]+(c[1]-b[1])*u,b[2]+(c[2]-b[2])*u]; }
 function acol(fate){ return fate<0?UNC:DATA.anat[fate]; }
-function mk(pos,col,size){
-  const g=new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
-  return new THREE.Points(g, new THREE.PointsMaterial({size, vertexColors:true, sizeAttenuation:true}));
-}
+const _SPH=new THREE.SphereGeometry(1,7,6);              // each cell = a small shaded sphere (GPU-instanced)
+function _fill(mesh,pos,col,size){ const dm=new THREE.Object3D(), cc=new THREE.Color();
+  for(let i=0;i<pos.length/3;i++){ dm.position.set(pos[3*i],pos[3*i+1],pos[3*i+2]); dm.scale.setScalar(size); dm.updateMatrix();
+    mesh.setMatrixAt(i,dm.matrix); cc.setRGB(col[3*i],col[3*i+1],col[3*i+2]); mesh.setColorAt(i,cc); }
+  mesh.instanceMatrix.needsUpdate=true; if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true; return mesh; }
+function mk(pos,col,size){ return _fill(new THREE.InstancedMesh(_SPH,new THREE.MeshLambertMaterial({}),pos.length/3),pos,col,size); }
+function mkt(pos,col,size){ return _fill(new THREE.InstancedMesh(_SPH,      // translucent skin envelope
+  new THREE.MeshLambertMaterial({transparent:true,opacity:0.24,depthWrite:false}),pos.length/3),pos,col,size); }
+let wIdx=0, skinOn=true;                     // which width-movie; whether the skin envelope shows
 function build(i){
-  const fr=DATA.frames[i];
+  const fr=DATA.movies[wIdx].frames[i];
   for(const p of pts){sc.remove(p);p.geometry.dispose();p.material.dispose();}
-  const N=fr.vm.length, hi=new Set(DATA.hi||[]);
-  const bp=[],bc=[],hp=[],hc=[];
+  const N=fr.vm.length, hi=new Set(DATA.hi||[]), SKIN=DATA.skin;
+  const bp=[],bc=[],hp=[],hc=[],kp=[],kc=[];
   for(let k=0;k<N;k++){
-    const c=(mode==='anat')?acol(fr.fate[k]):vcol(fr.vm[k]);
-    if(mode==='anat' && hi.has(fr.fate[k])){ hp.push(fr.xyz[3*k],fr.xyz[3*k+1],fr.xyz[3*k+2]); hc.push(c[0],c[1],c[2]); }
+    const f=fr.fate[k], c=(mode==='anat')?acol(f):vcol(fr.vm[k]);
+    if(mode==='anat' && f===SKIN){ kp.push(fr.xyz[3*k],fr.xyz[3*k+1],fr.xyz[3*k+2]); kc.push(c[0],c[1],c[2]); }
+    else if(mode==='anat' && hi.has(f)){ hp.push(fr.xyz[3*k],fr.xyz[3*k+1],fr.xyz[3*k+2]); hc.push(c[0],c[1],c[2]); }
     else { bp.push(fr.xyz[3*k],fr.xyz[3*k+1],fr.xyz[3*k+2]); bc.push(c[0],c[1],c[2]); }
   }
-  pts=[mk(bp,bc,0.030)]; if(hp.length) pts.push(mk(hp,hc,0.060));
+  pts=[mk(bp,bc,0.016)]; if(hp.length) pts.push(mk(hp,hc,0.030));
+  if(kp.length && skinOn) pts.push(mkt(kp,kc,0.028));
   for(const p of pts) sc.add(p);
+  const mv=DATA.movies[wIdx];
   document.getElementById('stage').textContent=fr.stage;
+  document.getElementById('wlabel').textContent=
+    'width '+Math.round(100/mv.pcp*0.25)+'%  ·  '+mv.kind+'  ·  '+mv.limbN+' limb cells';
   document.getElementById('slider').value=i;
 }
-function buildWidth(i){
-  const fr=DATA.width.frames[i];
-  for(const p of pts){sc.remove(p);p.geometry.dispose();p.material.dispose();}
-  const N=fr.limb.length, bp=[],bc=[],hp=[],hc=[];
-  for(let k=0;k<N;k++){ const x=fr.xyz[3*k],y=fr.xyz[3*k+1],z=fr.xyz[3*k+2];
-    if(fr.limb[k]){hp.push(x,y,z);hc.push(0.16,0.86,0.30);} else {bp.push(x,y,z);bc.push(0.60,0.64,0.70);} }
-  pts=[mk(bp,bc,0.028)]; if(hp.length) pts.push(mk(hp,hc,0.062));
-  for(const p of pts) sc.add(p);
-  document.getElementById('wlabel').textContent='width '+Math.round(fr.w*100)+'%  ·  LR |corr| '+fr.lrcorr.toFixed(2)+(fr.lrcorr<0.5?'  —  no left-right mode: limbless (fish)':'  —  left-right mode present: limbs (tetrapod)');
-}
-const KEY=[['Limb bud','#47db76'],['Eye','#33d8ff'],['Heart','#ee2938'],['Otic (ear)','#ffd23a'],
-           ['Neural','#5b78e8'],['Somite/meso','#f0985e'],['Yolk','#e6cc66']];
+const KEY=[['Limb','#47db76'],['Eye','#33d8ff'],['Heart','#ee2938'],['Ear','#ffd23a'],
+           ['Liver','#b857a3'],['Lung','#8cc7e6'],['Pancreas','#ccd14d'],['Gut','#d19a66'],
+           ['Rib','#f0f0db'],['Kidney','#a8497a'],['Muscle','#db6b6b'],['Notochord','#99d1b8'],
+           ['Cartilage','#ccdbeb'],['DRG','#b84de6'],['Sympath','#e673d9'],['Vessel','#cc1a33'],
+           ['Meninges','#9480c7'],['Connect','#c7b294'],['Jaw','#db9eb2'],['Choroid','#66c7db'],['Gonad','#e58599'],
+           ['Midbrain','#5785f0'],['Hindbrain','#669ee5'],['Cerebellum','#85b8f0'],
+           ['Atrium','#f2576b'],['Ventricle','#d91f2e'],['Outflow','#fc8570'],['LivHaem','#cc3357'],['Foregut','#e0ad70'],['Hindgut','#ad7a52'],
+           ['Nephron','#944d8a'],['Retina','#3dc2db'],['Adrenal','#f0b84d'],['Thymus','#c2d194'],['Spleen','#94294d'],
+           ['Bladder','#dbc28f'],['Adipose','#f5db8a'],['OlfBulb','#6b8feb'],
+           ['Mesothel','#a8bdad'],['Mesentery','#b8a885'],['Mucosa','#e0b885'],['HeadMes','#b39e85'],['Branchial','#cc8f9e'],['Blood','#bd1a24'],
+           ['Skin','#f5d1bd'],['Neural','#5b78e8']];
 fetch('movie/basic_vertebrate_frames.json').then(r=>r.json()).then(d=>{
-  DATA=d; vmin=d.vmin; vmax=d.vmax; nf=d.frames.length;
+  DATA=d; vmin=d.vmin; vmax=d.vmax; nf=d.movies[0].frames.length;
   document.getElementById('slider').max=nf-1;
-  document.getElementById('wslider').max=(d.width?d.width.frames.length-1:0);
+  document.getElementById('wslider').max=d.movies.length-1;
+  document.getElementById('wslider').value=d.movies.length-1; wIdx=d.movies.length-1;  // start on the tetrapod
   document.getElementById('key').innerHTML=KEY.map(k=>`<span><i class="dot" style="background:${k[1]}"></i>${k[0]}</span>`).join('');
-  const R=d.R||2.0; cam.position.set(R*1.15,R*0.65,R*1.5); ctrl.target.set(0,0,0);
+  const R=d.R||2.0; cam.position.set(R*0.15,R*0.30,R*2.35); ctrl.target.set(0,0,0);  // lateral: trunk head->tail across screen
   cur=params.get('f')?Math.min(nf-1,Math.max(0,parseInt(params.get('f')))):0;
   build(cur); syncPlay();
 });
 const playBtn=document.getElementById('play'),rotBtn=document.getElementById('rot'),
       modeBtn=document.getElementById('mode'),slider=document.getElementById('slider');
 function syncPlay(){ playBtn.textContent=playing?'⏸ pause':'▶ play'; }
-playBtn.onclick=()=>{playing=!playing;if(playing)wmode=false;syncPlay();if(playing)build(cur);};
+playBtn.onclick=()=>{playing=!playing;syncPlay();if(playing)build(cur);};
 rotBtn.onclick=()=>{ctrl.autoRotate=!ctrl.autoRotate;rotBtn.classList.toggle('on',ctrl.autoRotate);};
 modeBtn.onclick=()=>{ mode=(mode==='anat')?'volt':'anat'; modeBtn.textContent=(mode==='anat')?'anatomy':'voltage';
-  modeBtn.classList.toggle('on',mode==='anat'); if(!wmode) build(cur); };
-slider.oninput=()=>{wmode=false;playing=false;syncPlay();cur=parseInt(slider.value);build(cur);};
+  modeBtn.classList.toggle('on',mode==='anat'); build(cur); };
+slider.oninput=()=>{playing=false;syncPlay();cur=parseInt(slider.value);build(cur);};
+const skinBtn=document.getElementById('skinb');
+skinBtn.onclick=()=>{skinOn=!skinOn;skinBtn.classList.toggle('on',skinOn);build(cur);};
 const wslider=document.getElementById('wslider');
-wslider.oninput=()=>{wmode=true;playing=false;syncPlay();buildWidth(parseInt(wslider.value));};
+wslider.oninput=()=>{wIdx=parseInt(wslider.value);build(cur);};   // same timeline point, different width
 addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();rn.setSize(innerWidth,innerHeight);});
 function loop(t){ requestAnimationFrame(loop);
-  if(DATA&&playing&&!wmode&&t-last>FRAME_MS){last=t;cur=(cur+1)%nf;build(cur);}
-  ctrl.update(); rn.render(sc,cam); }
+  if(DATA&&playing&&t-last>FRAME_MS){last=t;cur=(cur+1)%nf;build(cur);}
+  if(!window.__freeze) ctrl.update();
+  rn.render(sc,cam); }
 requestAnimationFrame(loop);
+// paper-figure camera hook: window.__view('side'|'top'|'oblique') freezes the loop and poses the camera
+// (x = head->tail, y = dorsal up, z = left-right); side = look along z, top = look down y.
+window.__view=(v,roll)=>{ const R=(DATA&&DATA.R)||2.0; window.__freeze=true; ctrl.autoRotate=false; playing=false;
+  const rr=(roll==null?(v==='side'?-12.5:0):roll)*Math.PI/180;           // roll levels the sagittal flexure curl (side default -12.5)
+  if(v==='side'){ cam.up.set(-Math.sin(rr),Math.cos(rr),0); cam.position.set(0,0,R*2.6); }
+  else if(v==='top'){ cam.up.set(0,0,-1); cam.position.set(0,R*2.6,0); }
+  else { cam.up.set(0,1,0); cam.position.set(R*1.55,R*0.98,R*1.85); }   // true 3/4 oblique (shows depth)
+  cam.lookAt(0,0,0); rn.render(sc,cam); };
 </script></body></html>"""
 
 

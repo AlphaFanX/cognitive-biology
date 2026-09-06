@@ -33,7 +33,10 @@ ORGAN_SCHEDULE = [
     # mesenchyme ballooned the eye medially).
     dict(name="Eye",      unlock=0.46, ap_i=0, dv="mid",     place="paired", lr=(0.26, 0.60), germ={"Forebrain", "Nervous System", "Eye"}),
     dict(name="Otic",     unlock=0.45, ap_i=1, dv="dorsal",  place="paired", lr=(0.16, 0.55), germ={"Neural Crest", "Epidermal", "Nervous System", "Otic"}),
-    dict(name="Heart",    unlock=0.42, ap_i=2, dv="ventral", place="midline", germ={"Mesoderm", "Heart"}),
+    # Heart unlock 0.42 -> 0.58 (cycle 20, emergence timing): the Carnegie ladder has the primary heart
+    # tube at CS09 (prc2 ~0.59, 4.7% of the embryo) -- the heart is the FIRST organ to function; the old
+    # 0.42 made it emerge at CS13, four stages late (the composition instrument's CS09-12 zero row).
+    dict(name="Heart",    unlock=0.58, ap_i=2, dv="ventral", place="midline", germ={"Mesoderm", "Heart"}),
     # Lung: the lung buds sprout from the VENTRAL foregut endoderm and grow laterally, so it must germinate
     # where the endoderm actually is (ventral, near the midline) -- a paired mid-DV LR-antinode placement
     # found no endoderm cells (they are all ventral-midline) and the lung failed to sprout. An lr band (with

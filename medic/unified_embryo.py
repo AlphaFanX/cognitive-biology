@@ -123,7 +123,7 @@ STEPS = 50
 T0, T1 = 3.3, 26.0
 
 # cadherin adhesion per fate (SELECTIVE, same-fate): epithelial/neural high -> sorts tissues.
-ADH = {"Forebrain": 1.00, "Eye": 0.90, "Nervous System": 0.94, "Spinal Cord": 0.92,
+ADH = {"Forebrain": 1.00, "Telencephalon": 1.00, "Eye": 0.90, "Nervous System": 0.94, "Spinal Cord": 0.92,
        "Neural Crest": 0.82, "Mesoderm": 0.42, "Somite": 0.45, "Epidermal": 0.88,
        "Hypoblast": 0.50, "Yolk Syncytial Layer": 0.58, "Blastodisc": 0.30,
        "Proliferative Like Cell": 0.30, "Limb Bud": 0.50, "Heart": 0.55, "Otic": 0.85,
@@ -138,14 +138,15 @@ ADH = {"Forebrain": 1.00, "Eye": 0.90, "Nervous System": 0.94, "Spinal Cord": 0.
        "Mesothelium": 0.55, "Mesentery": 0.45, "Mucosa": 0.70, "HeadMes": 0.45,
        "Branchial": 0.60, "Blood": 0.20,
        # organ SUBHEADS (07-18) + new organ heads, grounded in the SEdb/AlphaGenome head registry
-       "Atrium": 0.55, "Ventricle": 0.55, "Outflow": 0.55, "LiverHaem": 0.30, "Foregut": 0.60,
+       "Atrium": 0.55, "Ventricle": 0.55, "Left Ventricle": 0.55, "Right Ventricle": 0.55,
+       "Outflow": 0.55, "LiverHaem": 0.30, "Foregut": 0.60,
        "Hindgut": 0.60, "Nephron": 0.70, "Retina": 0.85, "Adrenal": 0.60, "Thymus": 0.60, "Spleen": 0.50,
        "Bladder": 0.65, "Adipose": 0.40, "OlfactoryBulb": 0.62, "Cavity": 0.05}
 # integrin/ECM (fascia) per fate (NON-SELECTIVE, all neighbours): mesenchymal, so mesoderm/crest
 # high, epithelia low -- the complement of the cadherins -> binds the body into one continuum.
 ECM = {"Mesoderm": 1.00, "Somite": 0.90, "Neural Crest": 0.85, "Hypoblast": 0.60,
        "Yolk Syncytial Layer": 0.50, "Epidermal": 0.40, "Forebrain": 0.30, "Eye": 0.30,
-       "Nervous System": 0.35, "Spinal Cord": 0.35, "Blastodisc": 0.45,
+       "Nervous System": 0.35, "Spinal Cord": 0.35, "Blastodisc": 0.45, "Telencephalon": 0.30,
        "Proliferative Like Cell": 0.45, "Limb Bud": 0.92, "Heart": 0.70, "Otic": 0.30,
        "Liver": 0.72, "Lung": 0.55, "Pancreas": 0.68, "Gut": 0.74, "Rib": 0.95,
        "Kidney": 0.55, "Muscle": 0.85, "Notochord": 0.60, "Skin": 0.42,
@@ -154,16 +155,22 @@ ECM = {"Mesoderm": 1.00, "Somite": 0.90, "Neural Crest": 0.85, "Hypoblast": 0.60
        "Midbrain": 0.34, "Hindbrain": 0.35, "Cerebellum": 0.33,
        "Mesothelium": 0.62, "Mesentery": 0.85, "Mucosa": 0.40, "HeadMes": 0.88,
        "Branchial": 0.82, "Blood": 0.30,
-       "Atrium": 0.70, "Ventricle": 0.70, "Outflow": 0.70, "LiverHaem": 0.30, "Foregut": 0.70,
+       "Atrium": 0.70, "Ventricle": 0.70, "Left Ventricle": 0.70, "Right Ventricle": 0.70,
+       "Outflow": 0.70, "LiverHaem": 0.30, "Foregut": 0.70,
        "Hindgut": 0.70, "Nephron": 0.55, "Retina": 0.30, "Adrenal": 0.60, "Thymus": 0.50, "Spleen": 0.60,
        "Bladder": 0.50, "Adipose": 0.75, "OlfactoryBulb": 0.35, "Cavity": 0.02}
+from medic.subhead_program import extend_value_maps as _sub_evm    # the sub-head PROGRAM (table-driven roster)
+_sub_evm(ADH, ECM)                                                 # children inherit the parent's ADH/ECM
 FATES = list(ADH.keys())
 FIDX = {f: i for i, f in enumerate(FATES)}
 bind_fates(FATES)                          # let organ_sprouting read a committed cell's germ context
 # COMPACT point-organ primordia that CONDENSE into a coherent mass (mesenchymal condensation) rather
 # than staying salt-and-pepper. NOT the spanning tubes (Gut/Notochord/Vessel) or segmented axial
 # structures (Cartilage/Rib/Muscle/DRG), which are meant to be extended, not condensed to a point.
-POINT_ORGANS = ("Eye", "Otic", "Heart", "Lung", "Liver", "Pancreas", "Kidney")
+POINT_ORGANS = ("Eye", "Otic", "Heart", "Lung", "Liver", "Pancreas", "Kidney", "Spleen")
+# Spleen joined 2026-09-01 (cycle 23): it had NO growth law (the gut disease) -- its size was whatever
+# sprouting claimed, and the kidney-staged rebalance halved it (adult trace 84 -> 71). It condenses as
+# a single left-flank mass; its staged target is the representability floor (growth_program.FLOOR).
 # PAIRED point organs sit on the TWO LR antinodes (bilateral); they must condense as two separate
 # side-primordia, not to one median (which is the midline and collapses the pair). Heart/Liver = midline.
 PAIRED_ORGANS = ("Eye", "Otic", "Lung", "Pancreas", "Kidney")
@@ -172,18 +179,27 @@ PAIRED_ORGAN_IDS = np.array([FIDX[n] for n in PAIRED_ORGANS if n in FIDX])
 # primordium GROWS by recruiting nearby undifferentiated mesenchyme to a coherent size instead of a wisp.
 ORG_TARGET = {"Liver": 0.028, "Heart": 0.085, "Kidney": 0.016, "Lung": 0.013,   # Heart -> ~HESTA 9.3%
               "Eye": 0.014, "Otic": 0.007, "Pancreas": 0.006}
+# GUT TUBE TARGET (2026-08-31, Miles approved the allocation): HESTA says Primitive Gut = 5.33% of the
+# embryo; the model captured 0.97% (the largest deficit in the composition table) because the gut is a
+# spanning TUBE, deliberately excluded from the POINT_ORGANS condensation loop -- so it had NO growth
+# law at all: point organs recruit to ORG_TARGET, the tube kept only what sprouting claimed (the 70-cell
+# thread that capped the adult gut trace at ~60). The tube law below recruits generic cells NEAREST THE
+# TUBE along its whole AP span (not toward a point), so the tube thickens instead of blobbing.
+GUT_TARGET = 0.053                                  # HESTA Primitive Gut share (Gut+Mucosa+Foregut+Hindgut)
 VM_OF = {**LAYER_VM, "Limb Bud": -45.0, "Heart": -32.0, "Otic": -58.0, "Liver": -45.0,
          "Lung": -48.0, "Pancreas": -43.0, "Gut": -46.0, "Rib": -62.0,
          "Kidney": -50.0, "Muscle": -80.0, "Notochord": -38.0, "Skin": -50.0,
          "Cartilage": -60.0, "DRG": -60.0, "Sympathetic": -58.0, "Vessel": -40.0,
          "Meninges": -55.0, "Connective": -55.0, "Jaw": -56.0, "Choroid": -44.0, "Gonad": -50.0,
-         "Midbrain": -66.0, "Hindbrain": -66.0, "Cerebellum": -66.0,
+         "Midbrain": -66.0, "Hindbrain": -66.0, "Cerebellum": -66.0, "Telencephalon": -64.0,
          "Mesothelium": -50.0, "Mesentery": -52.0, "Mucosa": -47.0, "HeadMes": -55.0,
          "Branchial": -56.0, "Blood": -25.0,
-         "Atrium": -32.0, "Ventricle": -32.0, "Outflow": -34.0, "LiverHaem": -25.0, "Foregut": -46.0,
+         "Atrium": -32.0, "Ventricle": -32.0, "Left Ventricle": -32.0, "Right Ventricle": -32.0,
+         "Outflow": -34.0, "LiverHaem": -25.0, "Foregut": -46.0,
          "Hindgut": -46.0, "Nephron": -50.0, "Retina": -60.0, "Adrenal": -50.0, "Thymus": -55.0,
          "Spleen": -45.0, "Bladder": -48.0, "Adipose": -50.0, "OlfactoryBulb": -64.0,
          "Cavity": 0.0}  # bud Vm set-points; Cavity = fluid, ~0 mV (no membrane)
+_sub_evm(VM_OF=VM_OF)                                              # sub-head children inherit the parent's Vm
 
 
 # ---- FATE-MAP KNOBS (searchable; the joint HESTA differentiation search moves these) --------------
@@ -212,7 +228,10 @@ def fate_of(a, d, mln, prc2, fp=None):
         # (Otx2/En1/Gbx2/Atoh1) over the anterior a<brain_ap, then Nervous System / Spinal Cord (Hox-ON).
         b = fp["brain_ap"]
         if a < 0.56 * b and 0.12 < mln < 0.38: f = "Eye"
-        elif a < 0.48 * b: f = "Forebrain"
+        elif a < 0.30 * b: f = "Telencephalon"   # the forebrain's ANTERIOR antinode (Foxg1): cerebral
+        #                                          hemispheres/cortex -- the sub-head the recursion cascade
+        #                                          found (the forebrain still read as a chain, gap 3.2)
+        elif a < 0.48 * b: f = "Forebrain"       # posterior forebrain (diencephalon: thalamus/hypothalamus)
         elif a < 0.64 * b: f = "Midbrain"
         elif a < 0.84 * b: f = "Hindbrain"
         elif a < b: f = "Cerebellum"
@@ -385,8 +404,15 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
             # AER-DRIVEN LIMB PROLIFERATION (FGF8/FGF10): the real limb grows by cell division under the
             # apical ectodermal ridge, not by shoving the same cells outward. Boost the limb-bud pool's
             # division weight so the buds accumulate mesenchyme (lp['prolif']=1 = off = back-compatible).
-            if limb_buds and lpar["prolif"] > 1.0:
-                lb = fid[:born] == FIDX["Limb Bud"]
+            # AER REGRESSION (cycle 68): the AER boost + inheritance run only while the family is
+            # BELOW its staged share (growth_program, HESTA 4.7%) -- FGF8 withdraws when the limb
+            # reaches size and the progress zone closes. Without this gate the column-growth law's
+            # recruits compound under prolif x inherit to ~24% of the body (measured, this cycle).
+            from medic.growth_program import target as _aer_target
+            lb = fid[:born] == FIDX["Limb Bud"]
+            _aer_lt = _aer_target("Limb Bud", prc2, None)
+            _aer_open = _aer_lt is None or (lb.sum() / max(born, 1)) < _aer_lt
+            if limb_buds and lpar["prolif"] > 1.0 and _aer_open:
                 prolif[lb] *= lpar["prolif"]
                 # Tbx5 forelimb boost: extra AER division on the ANTERIOR (fore, a<0.5) bud so it grows to
                 # parity with the posterior pair and its cartilage resolves stylopod/zeugopod/autopod.
@@ -437,6 +463,13 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
             # AER progenitor inheritance: a limb-bud cell's daughters STAY limb mesenchyme (the AER holds
             # the progenitor pool limb-fated), so the extra divisions FILL the limb instead of seeding
             # undifferentiated cells that drift off (lp['inherit']=0 = off = back-compatible).
+            # CYCLE 69 (Miles's eye: "calves lost a lot of cells"): inheritance is UNGATED again.
+            # Cycle 68 closed it with the AER regression gate -- but inheritance is FATE-KEEPING,
+            # not growth: with it off, every limb daughter born during the outgrowth window
+            # (prc2 0.40 -> 0.23, exactly when the leg extends) fell out of the family and the
+            # calves emptied while recruitment replaced the mass proximally. Only the FGF8
+            # proliferation BOOST is share-gated (that is what compounded to 24%); daughters of
+            # limb cells dividing at the BASELINE rate stay limb -- the distal supply.
             if limb_buds and lpar["inherit"] and n_add:
                 _lb = (fid[par] == FIDX["Limb Bud"])
                 if _lb.any():
@@ -460,7 +493,11 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
         # LIMB BUDS: once the clock unlocks (prc2 low), specify paired FORE + HIND lateral-plate
         # lobes -- convert lateral-plate mesoderm / uncommitted cells in the four bud zones. Done
         # before heavy convergent extension so the posterior still has lateral cells to recruit.
-        if limb_buds and prc2 <= 0.46:
+        # gate 0.46 -> 0.60 (cycle 20, emergence timing): the electric frame + organ sprouting open with
+        # the FIRST organ (the heart's primary tube exists at CS09, prc2 ~0.59) -- the old single gate
+        # held every organ to CS12+ regardless of its unlock. Limb CONVERSION keeps its own 0.46 clock
+        # below; skin keeps 0.42; the gut tube law keeps the 0.46 condensation gate.
+        if limb_buds and prc2 <= 0.60:
             # ==== ELECTRIC BODY: low eigenmodes of the kNN gap-junction operator = the body axes ====
             # (same frame as the electric face / mammary line / six-pack, Paper #4). The AP mode gives
             # the antero-posterior coordinate; the LR mode is the bilateral frame -- its NODE is the
@@ -496,6 +533,10 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
                 # the AP + DV antinode grid of THIS body -- organs fill it in clock order (Miles's law)
                 _be = body_electric_antinodes(P)
                 antinode_levels = _be["ap_levels"]; dv_levels = _be["dv_levels"]
+            # width gate re-read EVERY step (cycle 20): the frame now freezes at prc2 0.60 on a narrower
+            # pre-CE body -- a frozen lr_aspect would under-read the width and fail the limb gate (the
+            # amphibian width-threshold law). The aspect is the LIVE body's width, the frame is the map.
+            lr_aspect = float(P[:, 2].std() / (P[:, 0].std() + 1e-9))
             miss = np.where(apE[:born] < 0)[0]                         # cells born since -> NN on the frame
             if len(miss):
                 tr, av, lv = apE_tree; j = tr.query(pos[miss], k=1)[1]
@@ -506,7 +547,7 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
             # ANTINODES (|lr| high, off-midline) give the bilateral sides, its NODE (lr~0) stays clear.
             # LIMBS FORM ONLY IF A GENUINE LR (bilateral) MODE EXISTS: a narrow, tapered body (fish) has
             # no left-right eigenmode (lr_quality low) -> no limbs; a wide body (tetrapod) does -> limbs.
-            if lr_aspect > lpar["gate_aspect"]:
+            if lr_aspect > lpar["gate_aspect"] and prc2 <= 0.46:   # limb conversion keeps its own clock
                 # The electric-body LR eigenmode gates WHETHER limbs form (lr_aspect: only a wide enough
                 # body has the bilateral mode). WHERE they form uses a LOCAL mediolateral coordinate --
                 # |z| relative to the body half-width at each AP slice -- so the lateral plate is found
@@ -561,12 +602,18 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
             # neighbours, so pull each point organ's cells toward their own median (mesenchymal
             # condensation), gated by the clock. Median (not mean) resists a few stray cells.
             _cond = float(np.clip((0.46 - prc2) / 0.24, 0.0, 1.0))
-            if _cond > 0:
+            # per-organ gate opening (cycle 20, emergence timing): the cardiac crescent condenses FIRST
+            # (the heart functions from CS10) -- its gate opens with its sprout unlock; others keep 0.46.
+            _COND_OPEN = {"Heart": 0.60}
+            if _cond > 0 or prc2 <= max(_COND_OPEN.values()):
                 _generic = {FIDX[f] for f in ("Mesoderm", "Somite", "Hypoblast", "Yolk Syncytial Layer",
                             "Blastodisc", "Proliferative Like Cell", "Neural Crest") if f in FIDX}
                 _fib = fid[:born]
                 _maxr = 0.16 * float(np.linalg.norm(pos[:born].max(0) - pos[:born].min(0)))
                 for _on in POINT_ORGANS:
+                    _cond_o = float(np.clip((_COND_OPEN.get(_on, 0.46) - prc2) / 0.24, 0.0, 1.0))
+                    if _cond_o <= 0:
+                        continue
                     _om = np.where(_fib == FIDX[_on])[0]
                     if len(_om) < 4:
                         continue
@@ -577,14 +624,45 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
                     if _on in PAIRED_ORGANS:
                         zc = pos[:born][_om, 2]
                         clusters = [_om[zc >= 0], _om[zc < 0]]
+                    elif _on == "Heart" and prc2 <= 0.32 and len(_om) >= 40:
+                        # THE CHAMBERS FORM (cycle 22): from the septation window (CS17, prc2~0.32) the
+                        # heart condenses as THREE LOBES, not one ball -- the reference heart is
+                        # four-lobed through CS17-23 while ours stayed a blob (the late-heart dip 66-80).
+                        # Partition by the SAME rules the final subhead split uses (anterior=outflow,
+                        # dorsal=atria, ventral=ventricles), so the end-of-run names land on the lobes;
+                        # each lobe condenses to its own centroid, and the lobe centroids are pulled to
+                        # the measured bp3d chamber offsets (heart-length units, ML left to laterality).
+                        _ax = pos[:born][_om, 0]; _dy = pos[:born][_om, 1]
+                        _athr = np.quantile(_ax, 0.72)
+                        _ofl = _om[_ax >= _athr]
+                        _rest = _om[_ax < _athr]
+                        _dm = np.median(pos[:born][_rest, 1]) if len(_rest) else 0.0
+                        _atr = _rest[pos[:born][_rest, 1] >= _dm]
+                        _ven = _rest[pos[:born][_rest, 1] < _dm]
+                        clusters = [c for c in (_ofl, _atr, _ven) if len(c) >= 4]
+                        _hlen = float(np.ptp(pos[:born][_om], axis=0).max()) + 1e-9
+                        _hc = pos[:born][_om].mean(0)
+                        # gain 0.30 -> 0.45 (cycle 29-lite, 2026-09-04): the CS23 heart A/B measured
+                        # tighter lobes worth +3 (77->80); hollowing was REFUTED (76 -> 75.7, the
+                        # honest null -- the reference heart at this scale is not hollow-dominant).
+                        _g = float(np.clip((0.32 - prc2) / 0.08, 0.0, 1.0)) * 0.45
+                        for _cl, (_dx, _dyo) in zip((_ofl, _atr, _ven),
+                                                    ((+0.25, -0.20), (+0.13, +0.15), (-0.16, -0.10))):
+                            if len(_cl) >= 4:
+                                tgt = _hc + _hlen * np.array([_dx, _dyo, 0.0])
+                                pos[:born][_cl] += _g * (tgt - pos[:born][_cl].mean(0))
                     else:
                         clusters = [_om]
-                    _tot = int(ORG_TARGET.get(_on, 0.012) * born)
+                    # THE GROWTH-PROGRAM HEAD (cycle 19): clock-gated staged targets for the wired
+                    # families (heart declines as the body outgrows it, liver balloons for fetal
+                    # haematopoiesis -- measured Carnegie ladder); unwired families keep ORG_TARGET.
+                    from medic.growth_program import target as _staged_target
+                    _tot = int(_staged_target(_on, prc2, ORG_TARGET.get(_on, 0.012)) * born)
                     for _cl in clusters:
                         if len(_cl) < 3:
                             continue
                         ctr = np.median(pos[:born][_cl], axis=0)
-                        pos[:born][_cl] += 0.38 * _cond * (ctr - pos[:born][_cl])   # condense this side to its own centroid
+                        pos[:born][_cl] += 0.38 * _cond_o * (ctr - pos[:born][_cl])   # condense this side to its own centroid
                         # GROW + PURIFY: recruit the closest GENERIC (undifferentiated) cells into this side up
                         # to its (per-side) target size, converting foreign generic cells in its core.
                         need = _tot // len(clusters) - len(_cl)
@@ -596,6 +674,71 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
                                 take = gi[np.argsort(dd)[:need]]
                                 fid[take] = FIDX[_on]; adhc[take] = ADH[_on]; ecmc[take] = ECM[_on]
                                 _fib = fid[:born]
+                # GUT TUBE GROWTH (the tube-organ recruitment law; see GUT_TARGET above). The gut family
+                # grows to its HESTA share by converting the generic cells nearest the EXISTING tube --
+                # per-cell distance to the nearest gut cell, so recruitment follows the tube's whole AP
+                # span. The pool it naturally drains is the ventral Hypoblast/YSL endoderm lineage (the
+                # yolk sac IS resorbed into the midgut) plus adjacent ventral mesenchyme (the muscular
+                # wall). Recruits enter as "Gut"; the existing Mucosa DV split and Foregut/Hindgut AP
+                # regionalisation subheads then sort them. Committed organs are never touched.
+                _gut_ids = [FIDX[n] for n in ("Gut", "Mucosa", "Foregut", "Hindgut") if n in FIDX]
+                _gm = np.where(np.isin(_fib, _gut_ids))[0]
+                _gneed = int(GUT_TARGET * born) - len(_gm)
+                if _cond > 0 and _gneed > 0 and len(_gm) >= 8:   # the tube law keeps the 0.46 gate
+                    gi = np.where(np.isin(_fib, list(_generic)))[0]
+                    if len(gi):
+                        d2tube, _ = cKDTree(pos[:born][_gm]).query(pos[:born][gi], k=1)
+                        okr = d2tube < _maxr
+                        gi, d2tube = gi[okr], d2tube[okr]
+                        take = gi[np.argsort(d2tube)[:_gneed]]
+                        fid[take] = FIDX["Gut"]; adhc[take] = ADH["Gut"]; ecmc[take] = ECM["Gut"]
+                        _fib = fid[:born]
+                # LIMB COLUMN GROWTH (cycle 68 -- the growth ladder's next customer; the cycle-66
+                # pool correction). The limb family is a spanning COLUMN like the gut is a tube:
+                # bud conversion is geometric (fitted at n=9k, limb 6.8%; drifted to 2.3% at 120k),
+                # so it too needs a fraction-of-born law. Recruit the generic cells NEAREST the
+                # existing limb columns (lateral-plate mesenchyme joining the bud -- recruitment is
+                # proximal, where generic neighbours exist; the AER prolif and the maturation's
+                # rank-uniform PD re-spacing carry the supply distally) up to the staged HESTA
+                # target (growth_program: 4.7% at CS12-13, the single measured anchor).
+                from medic.growth_program import target as _lim_target
+                _lm = np.where(_fib == FIDX["Limb Bud"])[0]
+                _ltar = _lim_target("Limb Bud", prc2, None)
+                if _cond > 0 and _ltar is not None and len(_lm) >= 8:
+                    _lneed = int(_ltar * born) - len(_lm)
+                    if _lneed > 0:
+                        gi = np.where(np.isin(_fib, list(_generic)))[0]
+                        # LATERAL-PLATE COMPETENCE (cycle 69, Miles's eye: "feet stuck together"):
+                        # nearest-to-column recruiting also converted the generic cells BETWEEN the
+                        # legs (nearest to both columns) -- limb cells at the crotch midline dragged
+                        # the foot anchors together. Recruits must sit in the Tbx5/Tbx4 lateral-
+                        # plate territory: per-AP-slice local ML fraction above 0.45 (the bud
+                        # conversion's own frame, looser than its 0.62 -- the sleeve around the
+                        # bud), which excludes the inter-limb midline by construction.
+                        if len(gi):
+                            _Pb = pos[:born]
+                            _apb = np.clip((_norm(_Pb[:, 0]) * 24).astype(int), 0, 23)
+                            _locmax = np.ones(24, np.float32)
+                            for _k in range(24):
+                                _mk = _apb == _k
+                                if _mk.sum() > 3:
+                                    _locmax[_k] = float(np.abs(_Pb[_mk, 2]).max()) + 1e-6
+                            _mll_g = np.abs(_Pb[gi, 2]) / _locmax[_apb[gi]]
+                            gi = gi[_mll_g > 0.45]
+                        if len(gi):
+                            d2limb, _ = cKDTree(pos[:born][_lm]).query(pos[:born][gi], k=1)
+                            okr = d2limb < _maxr
+                            gi, d2limb = gi[okr], d2limb[okr]
+                            take = gi[np.argsort(d2limb)[:_lneed]]
+                            fid[take] = FIDX["Limb Bud"]
+                            adhc[take] = ADH["Limb Bud"]; ecmc[take] = ECM["Limb Bud"]
+                            # HONEST NULL (cycle 68, measured): a c-Met-style migration step
+                            # (recruits pulled 0.6 toward their nearest column cell) was tried and
+                            # REVERTED -- it piled a dense proximal sleeve on the column and the
+                            # benchmark read it (canonical limb_bone 55.2 -> 52.4, muscle 78.4 ->
+                            # 75.3, grays 0.964 -> 0.957 vs the in-place variant). Recruits stay
+                            # in place as the lateral-plate sleeve; the AER prolif + the carve's
+                            # rank-uniform PD re-spacing carry the supply distally.
             # SKIN: the epidermal envelope = the outer radial SHELL (surface ectoderm). Per AP slice,
             # cells in the outer rim become Skin -- over the deep organs, which stay internal.
             if prc2 <= 0.42:

@@ -42,6 +42,8 @@ from pathlib import Path
 import numpy as np
 
 from medic.unified_embryo import simulate, _symmetrize, VMIN, VMAX, FATES, FIDX
+from medic.dv_spread_head import spread as _dv_measured_spread
+from medic.subhead_program import expand_names as _exn
 
 # the menagerie "Hill-organ" parts atlas: the homologous roster (bones + Hill-muscles + viscera),
 # decoded from a human genome and placed in situ. Used for the adult-stage anatomy reveal.
@@ -510,8 +512,16 @@ def mature_body(V, f):
 # CRANIAL fates only -- deliberately EXCLUDES "Nervous System"/"Spinal Cord", which run the whole body
 # length: including them made mature_cloud read the "head" as spanning the entire body, so it barely
 # scaled the real cranium and left an 11-heads-tall pinhead. The head = the cephalic vesicles.
-_HEAD_FATES = ("Forebrain", "Eye", "Midbrain", "Hindbrain",
+# 2026-08-30: + Telencephalon (the bulk of the forebrain) -- the sub-head split post-dated this tuple,
+# so the telencephalon ESCAPED the head-scale/rounding = the flat-wide "pancake brain" + the green
+# crown wings at the reveal. Use sites expand sub-head children so the mask survives future splits.
+_HEAD_FATES = ("Forebrain", "Telencephalon", "Eye", "Midbrain", "Hindbrain",
                "Retina", "OlfactoryBulb", "Cerebellum")
+
+
+def _head_ids():
+    from medic.subhead_program import expand_names
+    return [FIDX[n] for n in expand_names(_HEAD_FATES) if n in FIDX]
 
 
 def mature_cloud(Q, fate, f, params=None, register=True):
@@ -530,8 +540,15 @@ def mature_cloud(Q, fate, f, params=None, register=True):
     Q = Q.astype(float).copy()
     x = Q[:, 0]
     xmin, L = x.min(), np.ptp(x) + 1e-9
-    headf = [FIDX[n] for n in _HEAD_FATES if n in FIDX]
+    headf = _head_ids()
     hm = np.isin(fate, headf) if fate is not None else np.zeros(len(Q), bool)
+    # the BRAIN mask (cephalic vesicles, no eye): the ML envelope may COMPRESS the brain but never
+    # INFLATE it -- the two-sided head-slice conform was inflating the brain to fill the whole head
+    # silhouette (ML x2 = the "pancake brain" / green crown cap), overwriting the braincase rounding.
+    from medic.subhead_program import expand_names as _exn
+    _bf = [FIDX[n] for n in _exn(("Forebrain", "Telencephalon", "Midbrain", "Hindbrain",
+                                  "Cerebellum", "OlfactoryBulb")) if n in FIDX]
+    brainm = np.isin(fate, _bf) if fate is not None else np.zeros(len(Q), bool)
     neck = float(Q[hm, 0].min()) if hm.sum() >= 8 else xmin + 0.78 * L
     trunk_e = 1.0 + p["trunk_e"] * f              # sub-cranial axial elongation
     below = x < neck
@@ -614,7 +631,9 @@ def mature_cloud(Q, fate, f, params=None, register=True):
         u = (i + 0.5) / nb                                                    # AP fraction (0 = feet, 1 = crown)
         cap = (0.095                                                          # baseline (thin: limbs / neck)
                + 0.055 * np.exp(-((u - 0.68) / 0.13) ** 2)                    # chest ~0.15 (narrower tail: keeps the neck thin)
-               + 0.040 * np.exp(-((u - 0.95) / 0.05) ** 2))                   # cranium ~0.135 (let the head fill FB)
+               + 0.040 * np.exp(-((u - 0.95) / 0.05) ** 2)                    # cranium ~0.135 (let the head fill FB)
+               - 0.030 * np.exp(-((u - 0.855) / 0.022) ** 2))                 # NECK pinch (DV twin of the ML pinch:
+        #                                       the skin field had no cervical waist -- head merged into shoulders)
         if depth > cap:
             s = 1.0 - f * (1.0 - cap / depth)
             idx = np.where(m)[0]
@@ -647,85 +666,982 @@ def mature_cloud(Q, fate, f, params=None, register=True):
         if breadth > 1e-3:
             s = float(np.clip(1.0 + f * (tgt / breadth - 1.0), 0.4, 2.3))
             idx = np.where(m)[0]
+            if s > 1.0:
+                idx = idx[~brainm[idx]]                   # inflate the head SILHOUETTE, never the brain
             Q[idx, 2] = mid_ml + (Q[idx, 2] - mid_ml) * s
+    # ORGAN ISOTROPY under trunk elongation (2026-08-30): trunk_e stretches SPACE; a discrete organ is a
+    # cohesive body (the connexin capsule) whose POSITION rides the stretch while its own proportions hold.
+    # Counter-scale each discrete organ family's internal AP by the trunk factor about its centroid -- the
+    # general form of the heart's 4:1 residual and the "elongated viscera stack" in the canon comparison.
+    # Per-family isotropy KNOBS (see _ORGAN_FAMILIES / ISO_LAMBDA -- searched by medic.curve_train):
+    # lambda=1 fully counter-scales the trunk stretch inside the organ, lambda=0 rides it.
+    te = 1.0 + p["trunk_e"] * f
+    if fate is not None and te > 1.0:
+        for _fname, _fam in _ORGAN_FAMILIES.items():
+            lam = float(ISO_LAMBDA.get(_fname, 0.0))
+            if lam <= 0:
+                continue
+            d = 1.0 + (te - 1.0) * lam
+            fids = [FIDX[n] for n in _exn(_fam) if n in FIDX]
+            fm2 = np.isin(fate, fids)
+            if fm2.sum() >= 8:
+                c0 = float(Q[fm2, 0].mean())
+                Q[fm2, 0] = c0 + (Q[fm2, 0] - c0) / d
+    # Per-family ADULT ASPECT knobs (knob set 2, searched by medic.curve_train): the isotropy knob above
+    # counter-scales only the trunk's AP stretch; this is its general form -- each organ family (one connexin
+    # capsule, moved/scaled as ONE body) relaxes toward its own adult proportions (a1, a2 = 2nd/3rd principal
+    # axes vs the 1st) in its OWN principal frame, volume-preserving, blended by f. A fitted maturation anchor
+    # in the g_K pattern: the per-organ allometric growth program, genome-derivable later.
+    if fate is not None and f > 0 and ADULT_ASPECT:
+        for _fname, (_a1, _a2) in ADULT_ASPECT.items():
+            fam = _ORGAN_FAMILIES.get(_fname)
+            if fam is None or (abs(_a1 - 1.0) < 1e-9 and abs(_a2 - 1.0) < 1e-9):
+                continue
+            fids = [FIDX[n] for n in _exn(fam) if n in FIDX]
+            fm2 = np.isin(fate, fids)
+            if fm2.sum() < 8:
+                continue
+            P2 = Q[fm2]
+            c2 = P2.mean(0)
+            C2 = P2 - c2
+            Vt2 = np.linalg.svd(C2, full_matrices=False)[2]
+            co = C2 @ Vt2.T
+            s1 = 1.0 + f * (_a1 - 1.0)
+            s2 = 1.0 + f * (_a2 - 1.0)
+            co[:, 1] *= s1
+            co[:, 2] *= s2
+            co *= (s1 * s2) ** (-1.0 / 3.0)                # volume-preserving (D2 sees only the ratios)
+            Q[fm2] = co @ Vt2 + c2                          # organ's own frame, centroid (address) kept
+    # MEASURED ML WIDTH PROFILE (cycle 13): the width-profile audit against the canonical adult skin
+    # measured the body 30-60% too WIDE through the upper torso (epaulette flare), 2.7x too wide at
+    # the neck band (the no-neck look in ML), and too NARROW at the crown (the residual spike). The
+    # per-height conform below is the ML anthropometric envelope CALIBRATED to the measured canonical
+    # profile (the kidney/eye/liver measured-constants pattern, applied to the whole-body silhouette):
+    # each height band's ML deviations scale toward the canon halfwidth, bounded, blended by f. Runs
+    # LAST of the shape ops; the measured organ placements (kidney gutters, eye separation, chambers)
+    # re-assert after it in the placement phase.
+    if f > 0:
+        _xc = Q[:, 0]
+        _statc = np.ptp(_xc) + 1e-9
+        _hc = (_xc - _xc.min()) / _statc
+        # deep viscera + brain + eyes are EXEMPT: they have their own measured treatments (beans,
+        # wedge, chambers, coil, braincase, eye separation) and sit inside the body -- the silhouette
+        # the conform calibrates is carried by muscle/skin/fat/limb. Dragging the organs distorted
+        # their principal frames faster than the placement phase could re-assert them.
+        _vids = [FIDX[n] for n in _exn(("Heart", "Atrium", "Ventricle", "Left Ventricle",
+                                        "Right Ventricle", "Outflow", "Kidney", "Nephron", "Liver",
+                                        "LiverHaem", "Lung", "Spleen", "Stomach", "Duodenum",
+                                        "Foregut", "Gut", "Hindgut", "Mucosa", "Forebrain",
+                                        "Telencephalon", "Midbrain", "Hindbrain", "Cerebellum",
+                                        "OlfactoryBulb", "Eye", "Retina")) if n in FIDX]
+        _vex = np.isin(fate, _vids) if fate is not None else np.zeros(len(Q), bool)
+        for _lo, _refw in _CANON_ML_HALFW.items():
+            _mb = (_hc >= _lo - 0.025) & (_hc < _lo + 0.025)
+            if _mb.sum() < 30:
+                continue
+            _midz = float(np.median(Q[_mb, 2]))
+            _curw = float(np.percentile(np.abs(Q[_mb, 2] - _midz), 98)) / _statc
+            if _curw < 1e-4:
+                continue
+            _sc = float(np.clip(_refw / _curw, 0.60, 1.30))
+            _mb2 = _mb & ~_vex
+            Q[_mb2, 2] = _midz + (Q[_mb2, 2] - _midz) * (1.0 + f * (_sc - 1.0))
+        # MEASURED DV DEPTH PROFILE (cycle 53): the gross-sections scorecard found the body 1.4-3x TOO
+        # DEEP front-to-back everywhere below the chest -- the ML profile was measured and conformed
+        # (cycle 13) but its DV twin never was. The same treatment on the DV axis, ladder measured off
+        # the bp3d canon skin (98th-pct half-depth / stature per height band; the 0.40-0.45 spike is
+        # the hands' forward reach at thigh level, kept as measured). FULL height: a band-uniform DV
+        # scale squeezes both legs front-to-back without merging them (the ML webbing risk does not
+        # exist on this axis). Same exemptions, same bounds, same blend.
+        for _lo, _refd in _CANON_DV_HALFW.items():
+            _mb = (_hc >= _lo - 0.025) & (_hc < _lo + 0.025)
+            if _mb.sum() < 30:
+                continue
+            _midy = float(np.median(Q[_mb, 1]))
+            _curd = float(np.percentile(np.abs(Q[_mb, 1] - _midy), 98)) / _statc
+            if _curd < 1e-4:
+                continue
+            _scd = float(np.clip(_refd / _curd, 0.55, 1.30))
+            _mb2 = _mb & ~_vex
+            Q[_mb2, 1] = _midy + (Q[_mb2, 1] - _midy) * (1.0 + f * (_scd - 1.0))
+    # PLACEMENT RUNS LAST (the 08-09 law, cycle-2 reorder): shape first (envelopes/isotropy/aspect above),
+    # then the AP register and the MEASURED DV re-assertion in the FINAL envelope -- the aspect knobs move
+    # enough organ mass (the heart is 4.7k cells) to re-shape the band envelopes, which had left the heart
+    # reading 0.25 vs its 0.38 target when the spread ran mid-chain.
     if register:
-        Q = _visceral_ap_register(Q, fate, f)      # migrate each organ to its Hox-addressed axial level
-        Q = _ventral_viscera_spread(Q, fate, f)     # spread the viscera off the dorsal wall to fill the coelom
+        Q = _visceral_ap_register(Q, fate, f)      # migrate each organ FAMILY to its Hox-addressed axial level
+    # THE HEART TAKES ITS MEASURED FORM EARLY (cycle 31, 2026-09-04; the third organ with the
+    # blend-by-f disease after the kidney bean and spleen tongue): at f52 the family was a flat
+    # scattered pancake (principal sds 5.4:3.6:1 vs the canon's compact 1.24:1.09:1; 165/696 cells
+    # strewn to 0.10 stature) that only condensed by f75 -- while the real heart is a compact
+    # chambered organ by week 10. Family-as-one-body reshape toward the measured canon sds
+    # (0.0165/0.0146/0.0133 of stature, clip 0.25-1.75) + PERICARDIAL CLOSURE (the pericardium IS
+    # this organ's capsule; canon max radius 2.67x sds1, cap at 2.4): ellipsoid projection of
+    # stragglers, full-strength whenever the mature chain runs, BEFORE the chamber arrangement so
+    # the lobes re-establish inside the compact mass. A/B: fetus 76->89-91, newborn 80->90,
+    # infant 83->93, adult unchanged end-to-end (the -1 in the raw A/B was ordering artifact).
+    if fate is not None and f > 0:
+        _hidsM = [FIDX[n] for n in _exn(_HEART_FAMILY) if n in FIDX]
+        _hmM = np.isin(fate, _hidsM)
+        if _hmM.sum() >= 40:
+            _statM = float(np.ptp(Q[:, 0])) + 1e-9
+            cM = Q[_hmM].mean(0)
+            AM = Q[_hmM] - cM
+            _, _, VtM = np.linalg.svd(AM, full_matrices=False)
+            locM = AM @ VtM.T
+            tgtM = np.array(_HEART_SDS_M) * _statM
+            locM = locM * np.clip(tgtM / (locM.std(0) + 1e-9), 0.25, 1.75)
+            capM = 2.4 * tgtM
+            eM = np.sqrt(((locM / capM) ** 2).sum(1))
+            _outM = eM > 1.0
+            if _outM.any():
+                locM[_outM] = locM[_outM] / eM[_outM, None]
+            Q[np.where(_hmM)[0]] = cM + locM @ VtM
+    # THE CHAMBERS ARRANGE (cycle 7): the heart family registers as ONE body, but its 74-trace ceiling is
+    # chamber ARRANGEMENT -- within the family, each chamber sub-group moves as one body to its MEASURED
+    # offset from the heart centre (_CHAMBER_OFFSETS, bp3d anchors in heart-lengths). Model axes: left = -ML
+    # (the heart leans left at ML -0.13), dorsal = +DV. The family-level dv_spread runs after and moves the
+    # family as one, so the internal arrangement survives. Blended by f.
+    if fate is not None and f > 0:
+        _hids7 = [FIDX[n] for n in _exn(_HEART_FAMILY) if n in FIDX]
+        _hm7 = np.isin(fate, _hids7)
+        if _hm7.sum() >= 40:
+            hc7 = Q[_hm7].mean(0)
+            # heart-length scale CAPPED at the canonical heart (cycle 17b): the family's own ptp ran
+            # 2-4x the real heart, throwing the ventricles to |ML| ~0.11 of stature (canon ~0.045) --
+            # the wide chest slab under the shoulders that fed the star-cape. Per-organ D2 is
+            # scale-blind, so the heart trace never saw it; the cape census did.
+            _statH7 = float(np.ptp(Q[:, 0])) + 1e-9
+            hlen7 = min(float(np.ptp(Q[_hm7], axis=0).max()), _HEART_LEN_FRAC * _statH7) + 1e-9
+            for _cn, (_dsi, _dlf, _ddo) in _CHAMBER_OFFSETS.items():
+                _cids7 = [FIDX[n] for n in _exn((_cn,)) if n in FIDX]
+                cm7 = np.isin(fate, _cids7) & _hm7
+                if cm7.sum() < 8:
+                    continue
+                tgt7 = hc7 + hlen7 * np.array([_dsi, _ddo, -_dlf])   # (AP, DV, ML): dorsal=+DV, left=-ML
+                Q[cm7] += f * (tgt7 - Q[cm7].mean(0))
+    # THE CORD ASCENDS (ascensus medullae, 2026-08-30): the vertebral column outgrows the spinal cord, so the
+    # adult cord occupies the canal from the foramen magnum (medulla, ~0.87) down to the conus at L1/L2
+    # (~0.60) -- the embryonic cord fills the whole canal (our build, correctly). A TWO-POINT differential-
+    # growth map (v2: anchoring only the cranial end collapsed the cord to a point, because the model cord's
+    # cranial end sat at ~0.62, not at the medulla -- the cord as a whole was low AND long): both ends map to
+    # their canonical canal levels, interior linearly, blended by f. The eye found it: cord ran into the legs.
+    if fate is not None and f > 0:
+        _cids = [FIDX[n] for n in _exn(("Spinal Cord",)) if n in FIDX]
+        _cmk = np.isin(fate, _cids)
+        if _cmk.sum() >= 40:
+            xc = Q[_cmk, 0]
+            cr = float(np.percentile(xc, 97))               # current cranial end
+            ca = float(np.percentile(xc, 3))                # current caudal tip
+            xmin2 = Q[:, 0].min(); stat2 = np.ptp(Q[:, 0]) + 1e-9
+            conus = xmin2 + _CONUS_LEVEL * stat2
+            medulla = xmin2 + _MEDULLA_LEVEL * stat2
+            if cr - ca > 1e-9:
+                u = (xc - ca) / (cr - ca)                   # 0 = caudal .. 1 = cranial
+                tgt_x = conus + u * (medulla - conus)
+                Q[_cmk, 0] = xc + f * (tgt_x - xc)
+    # THE TAIL REGRESSES + THE YOLK RESORBS (cycle 5): the human embryonic tail (somites 35+) regresses by
+    # week 8 and the yolk sac resorbs into the midgut -- but their cells were left dangling below the pelvic
+    # floor at the MIDLINE, bridging the thighs into one fused column (measured: 1016 cells in the
+    # inter-thigh band -- Yolk Syncytial Layer 236, Cartilage 224, Mesothelium 142, Connective 122,
+    # Mesoderm 74, Notochord 32). Axial-residue fates below the pelvic floor near the midline retract up to
+    # a thin perineal-floor layer; leg fates (Muscle/Skin/Adipose/Vessel/Limb Bud) and off-midline cells
+    # (the knees) are untouched. The real events are embryonic, so this completes by mid-maturation (2f).
+    if fate is not None and f > 0:
+        # + Gonadal fates (cycle 17): the gonads were stranded at mid-thigh midline (53 cells in the
+        # 26-46% band) -- gonadal DESCENT (INSL3/gubernaculum) ends at the perineal floor, not the
+        # thigh; the same retract-to-the-floor map completes the descent at its anatomical level.
+        _tids = [FIDX[n] for n in _exn(("Yolk Syncytial Layer", "Mesothelium", "Cavity", "Connective",
+                                        "Mesoderm", "Cartilage", "Notochord",
+                                        "Gonadal Cortex", "Gonadal Medulla")) if n in FIDX]
+        _bl = [FIDX[n] for n in _exn(("Bladder",)) if n in FIDX]
+        _blm = np.isin(fate, _bl)
+        if _blm.sum() >= 20:
+            statT = np.ptp(Q[:, 0]) + 1e-9
+            floor_x = float(np.percentile(Q[_blm, 0], 5)) - 0.01 * statT       # just below the bladder
+            midT = float(np.median(Q[:, 2]))
+            _tm = (np.isin(fate, _tids) & (Q[:, 0] < floor_x)
+                   & (np.abs(Q[:, 2] - midT) < 0.02 * statT))
+            if _tm.sum():
+                g5 = min(1.0, 2.0 * f)
+                u5 = Q[_tm, 0]
+                lo5 = u5.min()
+                sq = (u5 - lo5) / max(floor_x - lo5, 1e-9)                     # 0..1 up the residue column
+                tgt5 = floor_x - 0.02 * statT * (1.0 - sq)                     # -> a thin perineal layer
+                Q[_tm, 0] = u5 + g5 * (tgt5 - u5)
+    # KIDNEY SIZE + PAIR SEPARATION (2026-08-30, cycle 3 v2): the metanephroi are compact beans in the
+    # PARAVERTEBRAL gutters. Measured from BodyParts3D (FMA7204/7205 in the FMA7163 skin frame): kidney SI
+    # length 103mm = 0.062 of stature, pair centroid separation 114mm = 0.069 (ratio 1.1). The model kidney
+    # was ~3x TOO LONG (side SI ~18% of stature) -- a fault per-organ D2 is scale-blind to; it made the pair
+    # read as one midline mass relative to its size (the honest kidney-80, and why a length-keyed separation
+    # v1 overshot to +-0.17 and scored WORSE, 63). Each side shrinks isotropically to measured size (the
+    # GDNF-RET branching program's output, fitted-to-measured) and sits at its measured gutter. Blended by f.
+    if fate is not None and f > 0:
+        _kids = [FIDX[n] for n in _exn(("Kidney", "Nephron")) if n in FIDX]
+        _km = np.isin(fate, _kids)
+        if _km.sum() >= 40:
+            stat3 = np.ptp(Q[:, 0]) + 1e-9
+            mlm = float(np.median(Q[_km, 2]))
+            for _sgn in (-1.0, 1.0):
+                sm = _km & ((Q[:, 2] - mlm) * _sgn >= 0)
+                if sm.sum() < 20:
+                    continue
+                c3 = Q[sm].mean(0)
+                # PER-SIDE BEAN (cycle 12): the isotropic shrink left each side a BALL; the canonical
+                # kidney side is a flattened bean -- per-side sds measured off the adult reference
+                # cloud: (0.0200, 0.0110, 0.0058) of stature (aspect ~3.4:1.9:1). Reshape in the
+                # side's OWN principal frame (its placement/tilt stays the model's).
+                A3k = Q[sm] - c3
+                _, _, Vt3k = np.linalg.svd(A3k, full_matrices=False)
+                loc3k = A3k @ Vt3k.T
+                sds3k = loc3k.std(0) + 1e-9
+                tgt3k = np.array(_KIDNEY_SDS) * stat3
+                # shrink-only toward measured (the expand variant overshot the smaller side: the
+                # reference sides differ, 0.0222 vs 0.0177, and _KIDNEY_SDS is their mean); the
+                # cycle-13 conform exempts the kidney, so no upstream squeeze needs undoing.
+                # FULL-STRENGTH shape (2026-09-04, cycle 25; the spleen-v3 idiom): the fetal/newborn
+                # trace sat at 68-72 with the shape blended by f -- the metanephric reniform form is
+                # established by ~week 10 (the GDNF-RET branching program), so the measured bean
+                # applies whenever the mature chain runs. A/B on the shipped frames: full-bean 84-90
+                # vs blended 68-72; forcing measured pair separation HURT (75) -- the model's own
+                # fetal separation is honest, so separation KEEPS the f blend. f=1 adult unchanged.
+                loc3k = loc3k * np.minimum(tgt3k / sds3k, 1.0)
+                Q[np.where(sm)[0]] = c3 + loc3k @ Vt3k
+                tgt = mlm + _sgn * 0.5 * _KIDNEY_SEP_FRAC * stat3
+                Q[sm, 2] += f * (tgt - float(Q[sm, 2].mean()))
+    # THE SPLEEN TAKES ITS MEASURED SHAPE (2026-09-02, cycle 24; the kidney treatment): the spleen
+    # trace sat at ~71 with the f51 fetal cliff at 54 -- and per-organ D2 is position-blind, so the
+    # deficit was SHAPE, not the queued placement suspicion: the canon spleen is a flattened tongue
+    # (principal sds 0.0190/0.0110/0.0096 of stature) where ours was a near-isotropic blob. The
+    # splenic condensation program (TLX1/BAPX1/NKX2-5 in the dorsal mesogastrium) fitted-to-measured:
+    # the family reshapes as ONE body in its OWN principal frame (placement/tilt stay the model's),
+    # each axis toward the measured sds, expansion capped 1.75x / shrink floored 0.5x, blended by f
+    # so the fetal window benefits too. GATE f>0 IS CORRECT (v4 tried unconditional to reach the
+    # handoff target E0=mature_body(0) and made it WORSE, 82->57 at f50, Miles's verdict: the
+    # handoff frames LERP cells between two bodies, and condensing the target STRETCHES the
+    # in-flight smear -- no static reshape can fix a body in transit; the residual f51-52 dip is
+    # the morph itself being scored against a static reference, a scorer-annotation item).
+    if fate is not None and f > 0:
+        _spids = [FIDX[n] for n in _exn(("Spleen",)) if n in FIDX]
+        _spm = np.isin(fate, _spids)
+        if _spm.sum() >= 25:
+            stat_sp = np.ptp(Q[:, 0]) + 1e-9
+            c_sp = Q[_spm].mean(0)
+            A_sp = Q[_spm] - c_sp
+            _, _, Vt_sp = np.linalg.svd(A_sp, full_matrices=False)
+            loc_sp = A_sp @ Vt_sp.T
+            sds_sp = loc_sp.std(0) + 1e-9
+            tgt_sp = np.array(_SPLEEN_SDS) * stat_sp
+            ratio_sp = np.clip(tgt_sp / sds_sp, 0.25, 1.75)
+            # FULL-STRENGTH from the first mesh frame (v3 of the blend; Miles: "i still see the
+            # spleen dip to ~50 at ~50"): the f52 family measured a 4x-too-long STREAK (sds 0.0845
+            # of stature vs the 0.0203 tongue -- the mesh build strings the young family out
+            # axially), which a 0.5 shrink-floor + tiny early f could never reach. Biologically the
+            # spleen is a compact condensation from CS21 on, so the measured form applies whenever
+            # this block runs. f=1 at the adult either way -> frozen benchmark untouched.
+            loc_sp = loc_sp * ratio_sp
+            # CAPSULE CLOSURE (cycle 30, 2026-09-04): the family leaves the cloud as a DIFFUSE halo
+            # (49/244 cells beyond 0.04 stature at f48) and an affine scale with a 0.25 shrink floor
+            # can never retrieve the persistent ~8-17-cell satellite clump (+0.06 SI, f55->f85) --
+            # the stragglers stretch the D2 normalization and cost ~10 points everywhere. The
+            # TLX1/BAPX1 condensation's long-range recruitment: committed splenic cells beyond the
+            # MEASURED capsule (canon max radius 0.0377 stature = 2.0x sds1) migrate onto it --
+            # ellipsoid projection in the family's own principal frame. A/B: fetus 69->81,
+            # newborn 73->82, infant 76->84, adult 76->83.
+            _cap = 2.0 * tgt_sp
+            _e = np.sqrt(((loc_sp / _cap) ** 2).sum(1))
+            _out = _e > 1.0
+            if _out.any():
+                loc_sp[_out] = loc_sp[_out] / _e[_out, None]
+            Q[np.where(_spm)[0]] = c_sp + loc_sp @ Vt_sp
+    # EYE PAIR to measured anatomy (cycle 4, the kidney treatment): the skin field's "temple discs" were the
+    # EYES -- the family spanned 17.3% of stature in ML (3x too wide, poking out at the temples; the otic
+    # pinnae measured innocent at 1.6-3.3%). Measured: eyeball 24mm = 0.0145 of stature, interpupillary
+    # 63mm = 0.038. Per-side isotropic shrink to eyeball size + measured separation, each side ONE body.
+    if fate is not None and f > 0:
+        _eids = [FIDX[n] for n in _exn(("Eye", "Retina")) if n in FIDX]
+        _em2 = np.isin(fate, _eids)
+        if _em2.sum() >= 20:
+            stat4 = np.ptp(Q[:, 0]) + 1e-9
+            emlm = float(np.median(Q[_em2, 2]))
+            for _sgn in (-1.0, 1.0):
+                sm = _em2 & ((Q[:, 2] - emlm) * _sgn >= 0)
+                if sm.sum() < 10:
+                    continue
+                c4 = Q[sm].mean(0)
+                elen = float(np.ptp(Q[sm], axis=0).max()) + 1e-9
+                sc = float(np.clip(_EYE_DIAM_FRAC * stat4 / elen, 0.1, 1.0))
+                Q[sm] = c4 + (Q[sm] - c4) * (1.0 + f * (sc - 1.0))
+                tgt = emlm + _sgn * 0.5 * _EYE_SEP_FRAC * stat4
+                Q[sm, 2] += f * (tgt - float(Q[sm, 2].mean()))
+    # THE JAW DESCENDS (cycle 14): the Jaw family (6.9k cells) was smeared through the WHOLE head --
+    # the anoikis/crowding deaths kept culling its crown strays (548-1983 per build = the fault
+    # flag), but the disease is PLACEMENT: the mandible belongs at the lower-ventral face. The
+    # family moves as ONE body (the law) to its address in the head's OWN frame -- centre at 12%
+    # up the head's height, ventral of the head axis by 25% of the head's DV depth -- with a mild
+    # compaction toward mandible proportions. The face (chin/jawline) emerges; the vault empties.
+    if fate is not None and f > 0:
+        _jids = [FIDX[n] for n in _exn(("Jaw",)) if n in FIDX]
+        _jm = np.isin(fate, _jids)
+        if _jm.sum() >= 60 and hm.sum() >= 30:
+            _hx = Q[hm, 0]
+            _hlen = float(np.ptp(_hx)) + 1e-9
+            _hcy = float(np.median(Q[hm, 1]))
+            _hdv = float(np.ptp(Q[hm, 1])) + 1e-9
+            _vsn = _ventral_sign(Q, fate)                    # which DV sign is the face side
+            _tgt = np.array([float(_hx.min()) + 0.12 * _hlen,
+                             _hcy + _vsn * 0.25 * _hdv,
+                             float(np.median(Q[hm, 2]))])
+            _jc = Q[_jm].mean(0)
+            _jext = float(np.ptp(Q[_jm], axis=0).max()) + 1e-9
+            _jsc = float(np.clip(0.45 * _hlen / _jext, 0.3, 1.0))   # compact to mandible scale
+            Q[np.where(_jm)[0]] = _jc + (Q[_jm] - _jc) * (1.0 + f * (_jsc - 1.0))
+            Q[np.where(_jm)[0]] += f * (_tgt - _jc)
+            # THE SENSORY ORGANS FACE FORWARD (cycle 56; Miles's eye: "eyes at the back of the head,
+            # with the ears at the nose. looks like a duck head" -- measured: Eye dv -5.0 DORSAL,
+            # OlfactoryBulb -4.4 dorsal, Otic +2.2 ventral, while the Jaw sat correctly ventral +3.0).
+            # The eye treatment above sets only SIZE and ML separation; the eyes' DV was never placed
+            # and the inherited build position flipped with the 09-02 convention recalibration. Each
+            # sensory family takes its DV address in the head's own frame with the SAME face-side
+            # sign the jaw uses: eyes upper-ventral face, olfactory bulb ventral under the frontal
+            # lobe, otic just DORSAL of the head axis (the ear behind the temple). DV translation
+            # only, family-as-one-body; ML separation and AP addresses stay measured.
+            for _snames, _dvfrac in ((("Eye", "Retina"), +0.28), (("OlfactoryBulb",), +0.30),
+                                     (("Otic",), -0.06)):
+                _sids = [FIDX[n] for n in _exn(_snames) if n in FIDX]
+                _sm2 = np.isin(fate, _sids)
+                if _sm2.sum() >= 10:
+                    _sdv = _hcy + _vsn * _dvfrac * _hdv
+                    Q[np.where(_sm2)[0], 1] += f * (_sdv - float(np.median(Q[_sm2, 1])))
+    # THE LIVER LOBATES (cycle 11) -- measured wedge within the registered family; runs before the
+    # gut coil so the coil's belly frame (below the liver) reads the true hepatic border.
+    if fate is not None and f > 0:
+        Q = _liver_lobation(Q, fate, f)
+        Q = _liverhaem_containment(Q, fate, f)
+    # THE MIDGUT COILS + THE COLON FRAMES (cycle 10) -- internal arrangement of the registered gut
+    # family (the chambers pattern); runs before the DV spread, which moves each family as one.
+    if fate is not None and f > 0:
+        Q = _gut_coil(Q, fate, f)
+    # measured DV placement runs LAST of the movers (the ascensus relocates 9k dorsal cord cells into the
+    # viscera bands, which re-shapes every band's DV envelope -- spread before it read organs ~0.1 too ventral)
+    if register:
+        Q = _dv_measured_spread(Q, fate, strength=f)   # re-assert each viscus's MEASURED bp3d depth
+    # FINAL BRAINCASE CONFORM -- genuinely the LAST word (the register's per-fate AP translations pull the
+    # six brain parts to their own addresses and re-squeeze the assembly's length, so it must follow them):
+    # the brain relaxes to the cranial aspect AP:DV:ML ~ 1.42:1.32:1.0; the envelopes shape the head
+    # silhouette, this shapes the organ inside it.
+    if brainm.sum() >= 30 and f > 0:
+        bc = Q[brainm].mean(0)
+        bext = np.ptp(Q[brainm], axis=0) + 1e-9
+        basp = np.array([1.42, 1.32, 1.0]); basp = basp / basp.mean()
+        bsc = np.clip(basp * float(bext.mean()) / bext, 0.5, 2.0)
+        Q[brainm] = bc + (Q[brainm] - bc) * (1.0 + f * (bsc - 1.0))
+        # THE VAULT IS A HARD BOUNDARY (cycle 4): loose brain cells plumed above the case and the skin field
+        # wrapped them into the CONE CROWN (crown-region fates measured: Forebrain/Midbrain/OlfactoryBulb).
+        # The skull molds the brain -- clamp outliers onto the robust braincase ellipsoid shell, blended by f.
+        bidx = np.where(brainm)[0]
+        P5 = Q[bidx]
+        half = np.array([np.percentile(np.abs(P5[:, a] - bc[a]), 98) for a in range(3)]) + 1e-9
+        rn = np.linalg.norm((P5 - bc) / half, axis=1)
+        out5 = rn > 1.0
+        if out5.any():
+            sc5 = 1.0 + f * (1.0 / rn[out5] - 1.0)
+            Q[bidx[out5]] = bc + (P5[out5] - bc) * sc5[:, None]
     return Q
 
 
-# organs that fill the COELOM (the ventral body cavity) by spreading VENTRALLY off the dorsal wall, giving the
-# chest + belly their front-to-back depth. Retroperitoneal organs (kidney/nephron/adrenal) stay dorsal, so they
-# are excluded, as are the axial structures (spinal cord/notochord/vertebrae).
-_VENTRAL_VISCERA = ("Heart", "Atrium", "Ventricle", "Outflow", "Lung", "Liver", "Spleen", "Pancreas",
-                    "Stomach", "Gut", "Bladder", "Thymus")
+# the heart FAMILY (all chambers incl the L/R ventricle split): migrated/spread as ONE body everywhere.
+_HEART_FAMILY = ("Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow")
+# discrete-organ families for the ISOTROPY knob (lambda in [0,1]: 0 = ride the trunk stretch,
+# 1 = full counter-scale). Searched by medic.curve_train against the staged-curve objective;
+# data/organ_cascade/iso_lambda.json (when present) overrides the defaults.
+_ORGAN_FAMILIES = {
+    "heart": _HEART_FAMILY, "kidney": ("Kidney", "Nephron"), "liver": ("Liver", "LiverHaem"),
+    "lung": ("Lung",), "spleen": ("Spleen",), "stomach": ("Foregut", "Stomach", "Duodenum"),
+    "pancreas": ("Pancreas",), "bladder": ("Bladder",), "thymus": ("Thymus",), "adrenal": ("Adrenal",),
+}
+ISO_LAMBDA = {"heart": 1.0, "kidney": 1.0, "stomach": 0.5, "liver": 1.0}   # searched winners; rest default 0
+# knob set 2: family -> (a1, a2) adult principal-frame aspect (2nd/3rd axes vs the 1st), volume-preserving.
+# Searched by medic.curve_train; data/organ_cascade/adult_aspect.json overrides these measured winners.
+# End-to-end verdict (curve adult window): lung +5.5 / stomach +1.8 / heart +1.6; liver's inner-loop gain
+# did NOT survive (flat) -- liver needs a lobation/form mechanism, not aspect. kidney/spleen ~noise-level.
+# KIDNEY REMOVED (cycle 3): on a properly SEPARATED pair the family PCA axis-1 IS the pair line, so the
+# family-level aspect distorts pair geometry, not organ shape (A/B on the measured pair: 61.5 -> 67 without).
+# Its (1.25,1.25) had been fitted to the old midline-fused geometry. Paired organs need per-side aspect.
+# Winners re-searched 2026-08-30 under scorer v2 (surface-normalised, deterministic): liver's real headroom
+# was invisible to v1 (solid-vs-surface artifact) -- iso 1.0 + aspect (0.8,1.25) took its trace 70.6 -> 77.6.
+ADULT_ASPECT = {"liver": (0.8, 1.25), "heart": (1.25, 1.25),
+                "lung": (1.25, 1.25), "spleen": (0.8, 1.25), "stomach": (1.25, 1.25)}
 
 
-def _ventral_viscera_spread(Q, fate, f, fill=0.20, wall_frac=0.72):
-    """THE VENTRAL-MIGRATION HEAD: the viscera are specified dorsally, against the foregut/notochord, then fill
-    the coelom as the lateral-plate mesoderm splits and the ventral body wall closes. Measured, the ventral
-    viscera already sit part-way into the cavity (~43--63% of the way from the spine to the ventral wall), but
-    the heart/ventricle lags most dorsal; this brings each ventral viscus a fraction `fill` of its REMAINING way
-    toward the ventral wall (an additive fill, anchored on the dorsal wall as reference), so the heart comes
-    forward and the belly evens out, capped short of the wall (`wall_frac`) so no viscus touches the skin. It is
-    a mild refinement, not a large shift, and it does not set the chest DEPTH -- that is the ribcage/body wall,
-    a separate mechanism. Retroperitoneal organs (kidney/adrenal) stay dorsal by exclusion. Blended by f."""
-    if fate is None or f <= 0:
-        return Q
-    y = Q[:, 1]; ymid = float(np.median(y))
-    spine = ymid; dsn = 1.0                           # dorsal reference = the spine; ventral = opposite it
-    for nm in ("Notochord", "Spinal Cord"):
-        fid = FIDX.get(nm)
-        if fid is not None and (fate == fid).sum() > 20:
-            spine = float(np.median(y[fate == fid])); dsn = -1.0 if spine >= ymid else 1.0
-            break
-    wall = float(np.percentile(dsn * (y - spine), 98))            # the ventral body wall, as an offset from spine
-    for nm in _VENTRAL_VISCERA:
-        fid = FIDX.get(nm)
-        if fid is None:
-            continue
-        m = fate == fid
-        if m.sum() < 8:
-            continue
-        off = dsn * (Q[m, 1] - spine)                 # ventral offset from the spine (>0 = ventral)
-        room = np.clip(wall_frac * wall - off, 0.0, None)         # remaining room to the (fractional) wall
-        Q[m, 1] += dsn * f * fill * room              # additive fill: move a fraction of the way forward
-    return Q
+def _load_iso():
+    import json as _json, os as _os
+    p = "data/organ_cascade/iso_lambda.json"
+    if _os.path.exists(p):
+        try:
+            ISO_LAMBDA.update({k: float(v) for k, v in _json.load(open(p)).items()})
+            print(f"  [mature] iso_lambda loaded: {ISO_LAMBDA}")
+        except Exception as e:
+            print(f"  [mature] iso_lambda load failed: {e}")
+    q = "data/organ_cascade/adult_aspect.json"
+    if _os.path.exists(q):
+        try:
+            ADULT_ASPECT.update({k: (float(v[0]), float(v[1])) for k, v in _json.load(open(q)).items()})
+            print(f"  [mature] adult_aspect loaded: {ADULT_ASPECT}")
+        except Exception as e:
+            print(f"  [mature] adult_aspect load failed: {e}")
+
+
+_load_iso()
 
 
 # Canonical antero-posterior level of each discrete organ (fraction of standing height, crown = 1, sole = 0),
 # from standard adult anatomy -- the Hox-addressed segmental level the organ's condensed mass belongs at. Only
 # discrete condensed organs are addressed; spanning structures (Gut/Notochord/Spinal Cord/Vessel) and the axial
 # segmental series (Rib/Cartilage/Muscle/Somite) are NOT -- they occupy a range of levels by design.
+# Keyed by ORGAN name (atlas_relax_search reads it by name); the register resolves each to its FAMILY.
 ORGAN_AP_ADDRESS = {
     "Forebrain": 0.94, "Eye": 0.93, "Retina": 0.93, "Midbrain": 0.92, "Otic": 0.91, "Hindbrain": 0.90,
-    "Cerebellum": 0.89, "Thymus": 0.78, "Lung": 0.74, "Outflow": 0.73, "Atrium": 0.72, "Heart": 0.71,
-    "Ventricle": 0.70, "Spleen": 0.66, "Liver": 0.65, "Pancreas": 0.63, "Adrenal": 0.62, "Kidney": 0.60,
-    "Nephron": 0.60, "Bladder": 0.48,
+    "Cerebellum": 0.89, "Thymus": 0.78, "Lung": 0.74, "Heart": 0.715, "Spleen": 0.66, "Liver": 0.65,
+    "Stomach": 0.64, "Pancreas": 0.63, "Adrenal": 0.62, "Kidney": 0.60, "Nephron": 0.60, "Bladder": 0.48,
+    # OlfactoryBulb (cycle 17e): it had NO address and its 38 cells were stranded at the crown
+    # (h 0.98-1.00) -- they WERE the witch-hat cone tip. The bulb lies under the frontal lobe.
+    "OlfactoryBulb": 0.925,
 }
+_CONUS_LEVEL = 0.60      # conus medullaris at L1/L2 -- the adult caudal end of the cord (ascensus medullae)
+_MEDULLA_LEVEL = 0.87    # foramen magnum -- the adult cranial end of the cord (just below Hindbrain 0.90)
+_KIDNEY_LEN_FRAC = 0.062  # kidney SI length / stature (measured: 103/1655 mm, bp3d FMA7204/5 in FMA7163)
+_KIDNEY_SDS = (0.0200, 0.0110, 0.0058)  # per-side principal sds / stature (canonical adult reference; the bean)
+_SPLEEN_SDS = (0.0190, 0.0110, 0.0096)  # spleen principal sds / stature (canonical adult reference; the
+# flattened tongue, aspect 1.97:1.15:1 -- measured 2026-09-02, cycle 24: the spleen trace sat at ~71 and
+# per-organ D2 is position-blind, so the deficit was SHAPE: our spleen was a near-isotropic blob)
+# Measured canonical adult skin: per-height ML 98th-pct halfwidth / stature (the width-profile audit,
+# 2026-08-31). 0.40-0.45 includes the hanging hands; 0.85-0.95 is the neck-head window. TORSO AND UP
+# ONLY: the leg bands were near-canon already, and a per-band uniform ML scale below the crotch drags
+# the inner-leg cells toward the midline with the outer envelope -- the gap closes, the fat-fork test
+# fails, and the legs web back into a column (the eyes caught it; crotch_gap 0.807 -> 0.738).
+_CANON_ML_HALFW = {
+    0.50: 0.170, 0.55: 0.164, 0.60: 0.164,
+    0.65: 0.152, 0.70: 0.140, 0.75: 0.141, 0.80: 0.131, 0.85: 0.049, 0.90: 0.043, 0.95: 0.047,
+}
+# Measured canonical per-height DV half-DEPTH / stature (cycle 53; bp3d skin FMA7163, brain-oriented
+# frame, 98th-pct |dv - band median|). The ML profile's twin -- the gross-sections scorecard found the
+# body 1.4-3x too deep below the chest with no DV conform to answer it. 0.40-0.45 = the hands' forward
+# reach at thigh level (kept as measured); 0.90 = the face+occiput window.
+_CANON_DV_HALFW = {
+    0.05: 0.028, 0.10: 0.034, 0.15: 0.050, 0.20: 0.045, 0.25: 0.053, 0.30: 0.053, 0.35: 0.047,
+    0.40: 0.096, 0.45: 0.107, 0.50: 0.081, 0.55: 0.077, 0.60: 0.084, 0.65: 0.094, 0.70: 0.078,
+    0.75: 0.083, 0.80: 0.058, 0.85: 0.074, 0.90: 0.103, 0.95: 0.062,
+}
+_KIDNEY_SEP_FRAC = 0.069  # kidney pair centroid separation / stature (measured: 114/1655 mm)
+_EYE_DIAM_FRAC = 0.0145   # eyeball diameter / stature (24 mm)
+_EYE_SEP_FRAC = 0.038     # interpupillary distance / stature (63 mm)
+# Chamber centroid offsets from the heart centre, in HEART-LENGTHS (bp3d heart 115mm), body axes
+# (dSI up+, dLEFT, dDORSAL). Measured from name-verified bp3d anchors: ventricles = their papillary
+# muscles (+0.05 SI: papillaries sit low in the chamber), atria = their AV valves (+0.15 SI: the valve
+# plane is the chamber's INFERIOR boundary), outflow = the pulmonary valve. Textbook signs confirmed:
+# LV far left, LA posterior-superior, RA rightmost, RV anterior-inferior, outflow antero-superior-left.
+_CHAMBER_OFFSETS = {
+    "Right Ventricle": (-0.17, +0.05, -0.25),
+    "Left Ventricle":  (-0.15, +0.47, -0.04),
+    "Atrium":          (+0.13, +0.11, +0.04),   # generic atrium fate -> mean of LA/RA anchors (+0.15 SI)
+    "Outflow":         (+0.25, +0.16, -0.20),
+}
+_COIL_ROWS = 4           # serpentine rows of the packed small-intestine mass (schematic jejunum-ileum)
+_HEART_LEN_FRAC = 0.070  # canonical heart long axis / stature (115/1655 mm, bp3d -- the same source as
+                         # _CHAMBER_OFFSETS; cycle 17b caps the offsets' scale at the real heart size)
+_HEART_SDS_M = (0.0165, 0.0146, 0.0133)   # canonical heart principal sds / stature (cycle 31; the
+                         # compact near-isotropic mass, measured off the canon adult reference cloud)
+# Liver wedge constants, MEASURED from the canonical adult reference cloud (stature units):
+# principal sds 0.0362/0.0277/0.0183 (aspect 1.98:1.51:1 -- ours scored a BALL, sphericity 0.68 vs
+# canonical 0.43); long axis oblique in the SI-ML plane, THIN end (left-lobe tip) superior-LEFT
+# toward the cardia; cross-section tapers ~1.37 -> 0.63 of mean from the thick right lobe to the tip.
+_LIVER_SDS = (0.0362, 0.0277, 0.0183)
+_LIVER_DIR = (0.52, 0.0, -0.85)   # thick(right,+ML) -> thin(left,-ML), rising +SI; model left = -ML
+_LIVER_TAPER = (1.30, 0.65)       # cross-section scale g(u) = a - b*u along thick->thin
 
 
-def _visceral_ap_register(Q, fate, f):
+def _liverhaem_containment(Q, fate, f):
+    """CYCLE 46 -- THE HAEM COMPARTMENT COMES HOME. Fetal hepatic haematopoiesis is INTERMIXED within
+    the liver (the subhead_completion note), and in the adult the programme has ended -- there is no
+    anatomy for LiverHaem OUTSIDE the capsule. The relational trace read Liver|LiverHaem as separated
+    and the anoikis ledger had been killing the strays (174 in the 343k build: cells scattered from
+    their family lose their neighbourhood) -- two independent instruments, one fault. The Mucosa-
+    follows-wall idiom: each LiverHaem cell beyond 3 liver-spacings relocates to its nearest liver
+    cell's neighbourhood (jittered to spacing), blended by f."""
+    hid, lid = FIDX.get("LiverHaem"), FIDX.get("Liver")
+    if fate is None or f <= 0 or hid is None or lid is None:
+        return Q
+    mH, mL = fate == hid, fate == lid
+    if mH.sum() < 8 or mL.sum() < 60:
+        return Q
+    from scipy.spatial import cKDTree
+    TL = cKDTree(Q[mL])
+    dnn, _ = TL.query(Q[mL][:: max(1, mL.sum() // 1500)], k=2)
+    spacing = float(np.median(dnn[:, 1])) + 1e-9
+    d, idx = TL.query(Q[mH], k=1)
+    # relocate anything beyond the CONTACT range (1.2 spacings), not a looser "stray" radius -- a
+    # clump at 2 spacings is neither far nor touching (the dead zone the first pass fell into)
+    far = d > 1.2 * spacing
+    if not far.any():
+        return Q
+    hi = np.where(mH)[0][far]
+    rng = np.random.default_rng(hid * 7919)
+    tgt = Q[mL][idx[far]] + rng.normal(size=(len(hi), 3)) * spacing * 0.6
+    Q[hi] += f * (tgt - Q[hi])
+    return Q
+
+
+def _liver_lobation(Q, fate, f):
+    """THE LIVER LOBATES (cycle 11): the liver family matures from the hepatoblast ball into the
+    measured oblique WEDGE -- thick right lobe under the right diaphragm dome, thin left-lobe tip
+    crossing superior-left toward the cardia (_LIVER_SDS/_LIVER_DIR/_LIVER_TAPER, canonical adult
+    reference). The kidney/chambers treatment: reshape about the registered family centroid in the
+    measured frame (long axis set to the measured oblique direction, principal sds to measured
+    absolute size, wedge taper on the cross-section), blended by f; the AP register and DV spread
+    move the family as one, so the wedge survives placement."""
+    from medic.subhead_program import expand_names as _exn3
+    if fate is None or f <= 0:
+        return Q
+    ids = [FIDX[n] for n in _exn3(("Liver", "LiverHaem")) if n in FIDX]
+    m = np.isin(fate, ids)
+    if m.sum() < 60:
+        return Q
+    stat = np.ptp(Q[:, 0]) + 1e-9
+    c = Q[m].mean(0)
+    A = Q[m] - c
+    e1 = np.array(_LIVER_DIR, float); e1 /= np.linalg.norm(e1)
+    e2 = np.array([0.0, 1.0, 0.0]) - e1 * e1[1]; e2 /= np.linalg.norm(e2)   # DV-most cross axis
+    e3 = np.cross(e1, e2)
+    E = np.stack([e1, e2, e3])                            # rows = the measured wedge frame
+    loc = A @ E.T                                         # family coords in the wedge frame
+    sds = loc.std(0) + 1e-9
+    tgt_sds = np.array(_LIVER_SDS) * stat
+    loc2 = loc * (1.0 + f * (tgt_sds / sds - 1.0))        # anisotropic size to measured
+    u = (loc2[:, 0] - loc2[:, 0].min()) / (np.ptp(loc2[:, 0]) + 1e-9)   # 0 thick .. 1 thin
+    g = _LIVER_TAPER[0] - _LIVER_TAPER[1] * u
+    gm = float(g.mean())
+    loc2[:, 1] *= 1.0 + f * (g / gm - 1.0)                # wedge taper (volume-neutral about the mean)
+    loc2[:, 2] *= 1.0 + f * (g / gm - 1.0)
+    Q[np.where(m)[0]] = c + loc2 @ E
+    return Q
+
+
+def _gut_coil(Q, fate, f):
+    """THE MIDGUT COILS + THE COLON FRAMES (cycle 10; viable since the cycle-9 tube law grew the gut
+    from 70 to ~3700 cells). Physiological herniation, 270-degree rotation and return (wk 6-10) end
+    with the small intestine as a PACKED MASS of coils framed by the colon -- embryonic events, so
+    the head completes by mid-maturation (2f). The small intestine (Duodenum/Gut wall) lays along a
+    layered serpentine centreline filling the belly frame (below the liver, above the bladder); each
+    Mucosa cell follows its NEAREST wall cell (the lining stays inside its own wall -- the subhead
+    relation survives); the colon (Hindgut) lays along the peripheral frame arc: ascending on the
+    RIGHT (+ML: model left = -ML, the chambers' convention), transverse under the liver, descending
+    left, sigmoid back to the midline. Cells keep their tube ORDER (rank along the wall's principal
+    axis), so this is a re-arrangement of the registered family, not a scramble; the partial blend
+    cap leaves the natural scatter as tube thickness. Runs inside the registered family, before the
+    family-level DV spread (which moves each family as one, so the coil survives it)."""
+    from medic.subhead_program import expand_names as _exn2
+    w = float(np.clip(2.0 * f, 0.0, 1.0)) * 0.85
+    if w <= 0 or fate is None:
+        return Q
+    wall_ids = [FIDX[n] for n in _exn2(("Gut", "Duodenum")) if n in FIDX]
+    muc_ids = [FIDX[n] for n in _exn2(("Mucosa",)) if n in FIDX]
+    col_ids = [FIDX[n] for n in _exn2(("Hindgut",)) if n in FIDX]
+    wm = np.isin(fate, wall_ids)
+    mm = np.isin(fate, muc_ids)
+    cm = np.isin(fate, col_ids)
+    if wm.sum() < 60 or cm.sum() < 30:
+        return Q
+    x = Q[:, 0]
+    stat = np.ptp(x) + 1e-9
+    # ---- the belly frame: below the liver, above the bladder, the body's own local width ----
+    liv = [FIDX[n] for n in _exn2(("Liver",)) if n in FIDX]
+    bla = [FIDX[n] for n in _exn2(("Bladder",)) if n in FIDX]
+    lm = np.isin(fate, liv); bm = np.isin(fate, bla)
+    gall = wm | mm | cm
+    x_top = float(np.percentile(x[lm], 8)) if lm.sum() >= 20 else float(np.percentile(x[gall], 92))
+    x_bot = (float(np.percentile(x[bm], 85)) + 0.015 * stat) if bm.sum() >= 20 else float(np.percentile(x[gall], 8))
+    if x_top - x_bot < 0.04 * stat:                       # degenerate frame: leave the build alone
+        return Q
+    band = (x > x_bot) & (x < x_top)
+    mid_ml = float(np.median(Q[:, 2]))
+    half_ml = 0.55 * float(np.percentile(np.abs(Q[band, 2] - mid_ml), 90)) if band.sum() > 50 else 0.06 * stat
+    dv0 = float(np.median(Q[gall, 1]))                    # the family's registered DV plane
+    # ---- small intestine: serpentine rows stacked SI, alternating ML sweep ----
+    P1 = Q[wm]
+    c1 = P1.mean(0)
+    A = P1 - c1
+    _, _, Vt = np.linalg.svd(A, full_matrices=False)
+    s_rank = np.argsort(np.argsort(A @ Vt[0])) / max(wm.sum() - 1, 1)   # 0..1 along the tube's own axis
+    R = _COIL_ROWS
+    row = np.minimum((s_rank * R).astype(int), R - 1)
+    u = s_rank * R - row                                   # 0..1 within the row
+    sweep = np.where(row % 2 == 0, u, 1.0 - u)             # alternate direction each row
+    margin = 0.10
+    tx = x_top - (row + 0.5) / R * (x_top - x_bot)
+    tml = mid_ml + (sweep * 2.0 - 1.0) * half_ml * (1.0 - margin)
+    tdv = dv0 + 0.12 * half_ml * np.sin(u * 2.0 * np.pi * 2.0)   # gentle DV undulation within each row
+    tgt_w = np.stack([tx, tdv, tml], 1)
+    idxw = np.where(wm)[0]
+    Q[idxw] = Q[idxw] + w * (tgt_w - Q[idxw])
+    # ---- mucosa follows its nearest wall cell (luminal lining) ----
+    if mm.sum() >= 8:
+        from scipy.spatial import cKDTree as _KD
+        _, nnw = _KD(P1).query(Q[mm], k=1)
+        idxm = np.where(mm)[0]
+        Q[idxm] = Q[idxm] + w * (tgt_w[nnw] - Q[idxm])
+    # ---- colon: the peripheral frame arc (ascending +ML, transverse top, descending -ML, sigmoid) ----
+    P3 = Q[cm]
+    c3 = P3.mean(0)
+    A3 = P3 - c3
+    _, _, Vt3 = np.linalg.svd(A3, full_matrices=False)
+    t3 = np.argsort(np.argsort(A3 @ Vt3[0])) / max(cm.sum() - 1, 1)
+    edge = half_ml * (1.0 + margin)
+    tx3 = np.empty(cm.sum()); tml3 = np.empty(cm.sum())
+    a_seg = t3 < 0.30                                      # ascending: right edge, bottom -> top
+    tx3[a_seg] = x_bot + (t3[a_seg] / 0.30) * (x_top - x_bot)
+    tml3[a_seg] = mid_ml + edge
+    t_seg = (t3 >= 0.30) & (t3 < 0.62)                     # transverse: along the top, right -> left
+    uu = (t3[t_seg] - 0.30) / 0.32
+    tx3[t_seg] = x_top
+    tml3[t_seg] = mid_ml + edge - uu * 2.0 * edge
+    d_seg = (t3 >= 0.62) & (t3 < 0.90)                     # descending: left edge, top -> bottom
+    uu = (t3[d_seg] - 0.62) / 0.28
+    tx3[d_seg] = x_top - uu * (x_top - x_bot)
+    tml3[d_seg] = mid_ml - edge
+    s_seg = t3 >= 0.90                                     # sigmoid: short leg back toward the midline
+    uu = (t3[s_seg] - 0.90) / 0.10
+    tx3[s_seg] = x_bot
+    tml3[s_seg] = mid_ml - edge * (1.0 - uu)
+    tgt3 = np.stack([tx3, np.full(cm.sum(), dv0), tml3], 1)
+    idxc = np.where(cm)[0]
+    Q[idxc] = Q[idxc] + w * (tgt3 - Q[idxc])
+    return Q
+
+
+def _visceral_ap_register(Q, fate, f, max_target=None):
     """THE AP-ADDRESS HEAD: slide each discrete organ's condensed mass along the body axis to its canonical
-    Hox-addressed level, read-only on every other cell. The head/notochord anchor apf=1..0.9; below them the
-    build_base cloud snaps organs onto coarse body-electric antinodes near the middle, so the viscera sag and
-    scramble (the heart drops onto the kidneys). This is the generalisation of the single hand-tuned cardiac
-    descent: each organ is a coherent condensed body that migrates to its axial address. A pure AP translation
-    (the organ keeps its shape + girth), blended by f so f=0 is the identity and the maturation boundary is
-    seamless. Fixes both the sag (offsets) and the order (inversions) in one pass."""
+    Hox-addressed level, read-only on every other cell (the build cloud snaps organs onto coarse body-electric
+    antinodes near the middle, so the viscera sag and scramble). A pure AP translation per ORGAN FAMILY, blended
+    by f so f=0 is the identity.
+
+    v2 (2026-08-30): EVERY family migrates as ONE body -- the heart's stale-fate bug #5, generalised. The old
+    per-name loop could not see sub-head children (Lung -> lobes, Liver -> hepatic lobes, ...), so exactly the
+    split organs never migrated (measured: lung stuck at 56% vs 74, liver at 32% vs 65, bladder at 14% vs 48,
+    kidney TORN partway, while heart/spleen/thymus/adrenal -- unsplit names -- all landed). One family, one
+    translation, expand_names every fate-keyed table; a done-mask so no cell moves twice. Stomach gained its
+    missing address (0.64 -- it had NONE and drifted to heart level)."""
     if fate is None or f <= 0:
         return Q
     x = Q[:, 0]; xmin = x.min(); stat = np.ptp(x) + 1e-9
-    for nm, target in ORGAN_AP_ADDRESS.items():
-        fid = FIDX.get(nm)
-        if fid is None:
-            continue
-        m = fate == fid
+    done = np.zeros(len(Q), bool)
+
+    def _move(names, target):
+        fids = [FIDX[n] for n in _exn(tuple(names)) if n in FIDX]
+        m = np.isin(fate, fids) & ~done
         if m.sum() < 8:
-            continue
+            return
         cur = float(((x[m] - xmin) / stat).mean())
-        Q[m, 0] += f * (target - cur) * stat        # translate the organ to its address (read-only elsewhere)
+        Q[m, 0] += f * (target - cur) * stat        # translate the family to its address (read-only elsewhere)
+        done[m] = True
+
+    for fam, members in _ORGAN_FAMILIES.items():    # viscera: family address = the parent organ's entry
+        target = ORGAN_AP_ADDRESS.get(fam.capitalize())
+        if target is not None and (max_target is None or target <= max_target):
+            _move(members, target)
+    for nm, target in ORGAN_AP_ADDRESS.items():     # head parts + anything not family-covered
+        if max_target is None or target <= max_target:
+            _move((nm,), target)
     return Q
+
+
+def standing_register(Q, fate, f=1.0):
+    """THE STANDING REGISTER (cycle 17c): ORGAN_AP_ADDRESS is defined as a fraction of STANDING
+    height (crown = 1, sole = 0), but the placement phase runs inside mature_cloud, BEFORE
+    grow_limbs extends the legs -- so once the legs added stature below, every address rode high
+    in the finished body (measured on the shipped adult: heart 0.79 vs 0.715, liver 0.73 vs 0.65,
+    bladder 0.61 vs 0.48; the atria/ventricle edges at 0.77-0.81 WERE the collar-spike mass under
+    the shoulders). Per-organ D2 is translation-blind, so only the eyes and the census saw it.
+    After the legs extend, the same registers re-assert on the standing frame: the same families,
+    the same measured constants, AP translation only (DV/ML untouched, so the spread's arrangement
+    survives); the cord re-maps to its canal levels; the perineal residue and the gonads re-anchor
+    just below the re-registered bladder."""
+    if fate is None or f <= 0:
+        return Q
+    # SUB-CRANIAL ONLY (the domeness collapse taught it): the head does not ride the leg
+    # extension -- it defines the top of the stature -- and re-registering the cephalic entries
+    # here pulled the brain ~2% down OUT of the vault the braincase conform had closed around it
+    # (domeness 0.60 -> 0.215, the brain-not-in-vault lesson again). Everything with an address
+    # below the neck re-asserts; the head keeps its build-time assembly.
+    Q = _visceral_ap_register(Q, fate, f, max_target=0.85)
+    from medic.subhead_program import expand_names as _exnS
+    x = Q[:, 0]
+    xmin = float(x.min())
+    stat = float(np.ptp(x)) + 1e-9
+    # the cord's two-point canal map, re-asserted on the standing stature
+    _cids = [FIDX[n] for n in _exnS(("Spinal Cord",)) if n in FIDX]
+    _cmk = np.isin(fate, _cids)
+    if _cmk.sum() >= 40:
+        xc = Q[_cmk, 0]
+        cr = float(np.percentile(xc, 97))
+        ca = float(np.percentile(xc, 3))
+        if cr - ca > 1e-9:
+            u = (xc - ca) / (cr - ca)
+            tgt_x = (xmin + _CONUS_LEVEL * stat) + u * ((_MEDULLA_LEVEL - _CONUS_LEVEL) * stat)
+            Q[_cmk, 0] = xc + f * (tgt_x - xc)
+    # perineal residue + gonads: the mature-time retract anchored them to the PRE-extension floor,
+    # which now sits mid-abdomen; re-anchor the midline residue band around the OLD floor into the
+    # thin layer just below the re-registered bladder (order preserved).
+    _tids = [FIDX[n] for n in _exnS(("Yolk Syncytial Layer", "Mesothelium", "Cavity", "Connective",
+                                     "Mesoderm", "Cartilage", "Notochord",
+                                     "Gonadal Cortex", "Gonadal Medulla")) if n in FIDX]
+    _bl = [FIDX[n] for n in _exnS(("Bladder",)) if n in FIDX]
+    _blm = np.isin(fate, _bl)
+    if _blm.sum() >= 20:
+        # floor from the bladder MEDIAN, not its p5 (cycle 17d): the family's lower tail hangs
+        # ~0.05 below its centre, so the p5 floor landed at 0.42 and dragged the crotch with it;
+        # the pubis bottom sits half a (canonical) bladder height below the bladder centre.
+        floor_x = float(np.median(Q[_blm, 0])) - 0.035 * stat
+        midT = float(np.median(Q[:, 2]))
+        _tm = (np.isin(fate, _tids) & (np.abs(Q[:, 2] - midT) < 0.02 * stat)
+               & (Q[:, 0] > floor_x - 0.06 * stat) & (Q[:, 0] < floor_x + 0.15 * stat))
+        if _tm.sum() >= 8:
+            xi = Q[_tm, 0]
+            rk = np.argsort(np.argsort(xi)) / max(len(xi) - 1, 1)
+            tgt5 = floor_x - 0.02 * stat * (1.0 - rk)
+            Q[_tm, 0] = xi + f * (tgt5 - xi)
+        # THE COCCYX CONDENSES (cycle 17d): the retract map had stacked the tail's skeletal
+        # residue (Cartilage 486 + Notochord 148 measured) into a razor-thin MIDLINE wafer at
+        # the floor -- but the embryonic tail skeleton is the sacrococcygeal column: it belongs
+        # as a compact body at the DORSAL pelvic floor, behind the pelvic outlet, not spread
+        # across it. Condense those fates (floor band, near-midline) to a small ball seated at
+        # the floor level against the dorsal wall; the ventral midline empties for the crotch.
+        _ccids = [FIDX[n] for n in _exnS(("Cartilage", "Notochord", "Mesoderm")) if n in FIDX]
+        _ccm = (np.isin(fate, _ccids) & (np.abs(Q[:, 2] - midT) < 0.03 * stat)
+                & (Q[:, 0] > floor_x - 0.05 * stat) & (Q[:, 0] < floor_x + 0.04 * stat))
+        if _ccm.sum() >= 30:
+            dvs = _ventral_sign(Q, fate)
+            fb = np.abs(Q[:, 0] - floor_x) < 0.05 * stat
+            y_band = Q[fb, 1]
+            dorsal_wall = float(np.percentile(-dvs * y_band, 88))
+            tgt_c = np.array([floor_x + 0.01 * stat, -dvs * (dorsal_wall - 0.01 * stat),
+                              midT])
+            P_c = Q[_ccm]
+            c_c = P_c.mean(0)
+            shrink = np.clip(0.012 * stat / (P_c.std(0) + 1e-9), 0.1, 1.0)
+            Q[_ccm] = P_c + f * ((c_c + (P_c - c_c) * shrink) + (tgt_c - c_c) - P_c)
+        # THE HIP SEATS AT THE PELVIC FLOOR (cycle 17d): with the viscera standing at their true
+        # addresses, the legs' columns still topped out at ~0.43 of stature against a floor at
+        # ~0.47 -- the missing 4% is the upper thigh, and it is why the figure read short-legged
+        # (canon crotch 0.48). The limb attaches AT its girdle (the femoral head in the
+        # acetabulum; the arms' seat-below-the-head rule, applied to the hips): everything below
+        # the legs' old top stretches upward from the sole to meet the floor; the thin band of
+        # perineal contents between old top and floor compresses onto the floor's underside.
+        # Sole and crown unchanged, so the stature and every registered address hold.
+        if "Limb Bud" in FIDX:
+            leg2 = (fate == FIDX["Limb Bud"]) & (Q[:, 0] < floor_x)
+            if leg2.sum() >= 100:
+                t_leg = float(np.percentile(Q[leg2, 0], 97))
+                sole = float(np.percentile(Q[:, 0], 0.2))
+                if t_leg < floor_x - 0.005 * stat and t_leg - sole > 0.10 * stat:
+                    s = min((floor_x - sole) / (t_leg - sole), 1.15)
+                    low = Q[:, 0] < t_leg
+                    Q[low, 0] = sole + (Q[low, 0] - sole) * (1.0 + f * (s - 1.0))
+                    band = (Q[:, 0] >= t_leg) & (Q[:, 0] < floor_x) & ~low
+                    Q[band, 0] = floor_x - (floor_x - Q[band, 0]) * (1.0 - f * 0.7)
+    # THE CROWN DOMES (polish cycle, v2 -- the p95 trim failed: the tails are >5% of their
+    # families, and clamping them DOWN would shrink the stature the registers just used). The
+    # telencephalic vesicles expand LATERALLY under the vault -- the brain grows wide, not
+    # pointed -- so cephalic cells above the collective 92nd percentile redistribute onto a
+    # spherical cap of the head's own radius (deterministic golden-angle disks, height kept):
+    # the midline column that the field tapered into the topknot becomes a closed dome.
+    _bfam = [FIDX[n] for n in _exnS(("Forebrain", "Telencephalon", "Midbrain", "Hindbrain",
+                                     "Cerebellum", "OlfactoryBulb", "Eye", "Retina")) if n in FIDX]
+    _cm2 = np.isin(fate, _bfam)
+    if _cm2.sum() >= 200:
+        xh = Q[_cm2, 0]
+        x_cap = float(np.percentile(xh, 92))
+        x_top = float(np.percentile(xh, 99.8))
+        span_c = max(x_top - x_cap, 1e-6)
+        yc = float(np.median(Q[_cm2, 1]))
+        zc = float(np.median(Q[_cm2, 2]))
+        rr = np.hypot(Q[_cm2, 1] - yc, Q[_cm2, 2] - zc)
+        R_head = float(np.percentile(rr, 85))
+        hi = _cm2 & (Q[:, 0] > x_cap)
+        idxh = np.where(hi)[0]
+        if len(idxh) >= 20:
+            u = np.clip((Q[idxh, 0] - x_cap) / span_c, 0.0, 1.0)
+            allowed = 0.85 * R_head * np.sqrt(np.clip(1.0 - u ** 2, 0.05, 1.0))
+            k = np.arange(len(idxh))
+            gr = allowed * np.sqrt((k % 89) / 89.0)
+            th = k * 2.399963
+            Q[idxh, 1] += f * ((yc + gr * np.sin(th)) - Q[idxh, 1])
+            Q[idxh, 2] += f * ((zc + gr * np.cos(th)) - Q[idxh, 2])
+    # THE STANDING CONFORM (cycle 17e, the frame bug's third instance): the measured canonical
+    # width profile is per-height of the STANDING body, but the mature-time conform runs before
+    # the legs extend -- its neck band squeezed what became the crown, and the true neck kept
+    # torso width (measured: neck-level mass at |ML| 0.084-0.105 vs the canonical 0.049 -- the
+    # residual collar spikes). The same constants re-assert on the standing bands; the deep
+    # viscera, brain and eyes stay exempt exactly as in the mature-time pass.
+    _vids2 = [FIDX[n] for n in _exnS(("Heart", "Atrium", "Ventricle", "Left Ventricle",
+                                      "Right Ventricle", "Outflow", "Kidney", "Nephron", "Liver",
+                                      "LiverHaem", "Lung", "Spleen", "Stomach", "Duodenum",
+                                      "Foregut", "Gut", "Hindgut", "Mucosa", "Forebrain",
+                                      "Telencephalon", "Midbrain", "Hindbrain", "Cerebellum",
+                                      "OlfactoryBulb", "Eye", "Retina")) if n in FIDX]
+    _vex2 = np.isin(fate, _vids2)
+    _xc2 = Q[:, 0]
+    _statc2 = np.ptp(_xc2) + 1e-9
+    _hc2 = (_xc2 - _xc2.min()) / _statc2
+    # CONTINUOUS target profile (the Saturn-ring lesson): per-band constant targets make a hard
+    # shelf wherever the canon profile steps (shoulder 0.131 -> neck 0.049 at 0.85 minted a
+    # razor-thin brim in the render). The target interpolates smoothly in height, and the
+    # current width is measured on fine smoothed bands, so the conform is shelf-free.
+    from scipy.ndimage import uniform_filter1d as _uf1
+    _keys = np.array(sorted(_CANON_ML_HALFW))
+    _vals = np.array([_CANON_ML_HALFW[k] for k in _keys])
+    _nb2 = 44
+    _edges = np.linspace(0.475, 0.985, _nb2 + 1)
+    _cen = 0.5 * (_edges[:-1] + _edges[1:])
+    _curw_b = np.full(_nb2, np.nan)
+    _midz_b = np.full(_nb2, 0.0)
+    for _k in range(_nb2):
+        _mb = (_hc2 >= _edges[_k]) & (_hc2 < _edges[_k + 1])
+        if _mb.sum() < 20:
+            continue
+        _midz_b[_k] = float(np.median(Q[_mb, 2]))
+        _curw_b[_k] = float(np.percentile(np.abs(Q[_mb, 2] - _midz_b[_k]), 98)) / _statc2
+    _ok = ~np.isnan(_curw_b)
+    if _ok.sum() >= 6:
+        _curw_s = _curw_b.copy()
+        _curw_s[_ok] = _uf1(_curw_b[_ok], 3)
+        _tgt_b = np.interp(_cen, _keys, _vals)
+        _sc_b = np.clip(_tgt_b / np.maximum(_curw_s, 1e-4), 0.60, 1.30)
+        _in = (_hc2 >= 0.475) & (_hc2 < 0.985) & ~_vex2
+        _ki = np.clip(((_hc2[_in] - 0.475) / (0.985 - 0.475) * _nb2).astype(int), 0, _nb2 - 1)
+        _okc = _ok[_ki]
+        _idx2 = np.where(_in)[0][_okc]
+        _kk = _ki[_okc]
+        Q[_idx2, 2] = (_midz_b[_kk] + (Q[_idx2, 2] - _midz_b[_kk])
+                       * (1.0 + f * (_sc_b[_kk] - 1.0)))
+    # ---- PLEURAL/PERITONEAL CONTAINMENT (cycle 70; Miles's eye: "cells outside the skin") ----
+    # The conform narrows the WALL but exempts the viscera (their frames must not distort), so the
+    # chest stack could protrude through the conformed envelope (census: 320 cells at h~0.77 incl
+    # lung-lobe cells, 0.08-0.18 stature outside). The body wall is a HARD BOUNDARY (mesothelium):
+    # any trunk-band cell beyond the measured canonical ML/DV halfwidth at its height -- exempt
+    # viscera included -- CLAMPS to just inside the wall. Only the protruding tail moves (organ
+    # frames keep their bulk); Limb Bud is excluded (arms/hands protrude laterally by design).
+    _lb_id = FIDX.get("Limb Bud", -1)
+    _dvk = np.array(sorted(_CANON_DV_HALFW))
+    _dvv = np.array([_CANON_DV_HALFW[k] for k in _dvk])
+    _mby_b = np.full(_nb2, 0.0)
+    for _k in range(_nb2):
+        _mb = (_hc2 >= _edges[_k]) & (_hc2 < _edges[_k + 1])
+        if _mb.sum() >= 20:
+            _mby_b[_k] = float(np.median(Q[_mb, 1]))
+    _trunk = (_hc2 >= 0.475) & (_hc2 < 0.985) & (fate != _lb_id)
+    _kt = np.clip(((_hc2[_trunk] - 0.475) / (0.985 - 0.475) * _nb2).astype(int), 0, _nb2 - 1)
+    _ti = np.where(_trunk)[0]
+    _wall_ml = np.interp(_cen, _keys, _vals)[_kt] * _statc2
+    _wall_dv = np.interp(_cen, _dvk, _dvv)[_kt] * _statc2
+    _offz = Q[_ti, 2] - _midz_b[_kt]
+    _offy = Q[_ti, 1] - _mby_b[_kt]
+    _ozc = np.abs(_offz) > 1.03 * _wall_ml
+    _oyc = np.abs(_offy) > 1.03 * _wall_dv
+    Q[_ti[_ozc], 2] = _midz_b[_kt[_ozc]] + np.sign(_offz[_ozc]) * 0.99 * _wall_ml[_ozc]
+    Q[_ti[_oyc], 1] = _mby_b[_kt[_oyc]] + np.sign(_offy[_oyc]) * 0.99 * _wall_dv[_oyc]
+    # LEG CONTAINMENT (cycle 71, Miles's eye: "leg cells outside the skin" -- the trunk clamp
+    # starts at h 0.475, the legs never had a wall; census: Limb Bud strays at ankle height
+    # |ML| 0.18 where the legs stand at 0.06). Below ANY hand (h < 0.25) the only lateral mass
+    # is the two legs: each side's cells clamp ML to its own column line +- the tube wall
+    # (thigh radius x flesh margin). ML only -- the feet keep their forward (DV) reach.
+    _legb = _hc2 < 0.25
+    if _legb.sum() > 200:
+        _mid3 = float(np.median(Q[:, 2]))
+        _rw = 1.35 * 0.040 * _statc2
+        for _sgn in (-1.0, 1.0):
+            _ms = _legb & (np.sign(Q[:, 2] - _mid3) == _sgn)
+            if _ms.sum() < 50:
+                continue
+            _line = float(np.median(Q[_ms, 2]))
+            _off3 = Q[_ms, 2] - _line
+            _oc3 = np.abs(_off3) > _rw
+            _mi3 = np.where(_ms)[0][_oc3]
+            Q[_mi3, 2] = _line + np.sign(_off3[_oc3]) * 0.99 * _rw
+    return Q
+
+
+def populate_autopods(Q, fate, frac=1.0):
+    """THE AUTOPODS GET CELLS (Miles, frame 91: 'the hands are empty, no cells in them'). The
+    hand/foot volumes were MESH-ONLY -- shells densified into the skin field -- so when the
+    anatomy reveal dissolved the skin there were no cells to reveal: empty gloves. The autopod
+    territory is real tissue: each limb's DISTAL cells extend into its own hand/foot volume
+    (the Hox13 autopod populated by its own limb, the same cells that built the stylopod and
+    zeugopod). Deterministic: distal-band cells land on the schematic autopod's shell vertices
+    (cycled) with a small inward jitter; ~30% stay at the wrist/ankle for continuity. Returns
+    (Q, hv, hf, fv, ff) -- the shells it used, so the skin field can reuse them EXACTLY (the
+    field must not re-derive anchors from the now-populated limb: the hand would walk).
+    Idempotent per frame: each movie frame rebuilds Q fresh, then populates once."""
+    Q = Q.copy()
+    hv, hf = hands_mesh(Q, fate, frac=frac)
+    fv, ff = feet_mesh(Q, fate, frac=frac)
+    if frac <= 0.05:
+        return Q, hv, hf, fv, ff
+    x, z = Q[:, 0], Q[:, 2]
+    H = float(np.ptp(x)) + 1e-9
+    apf = (x - x.min()) / H
+    mid = float(np.median(z))
+    limbm = np.asarray(fate) == LIMB
+    for shell, m_band, FLOOR in (
+            (hv, limbm & (apf >= 0.45), 320),               # arms -> hands
+            (fv, limbm & (apf < 0.30), 420)):               # legs -> feet
+        shell = np.asarray(shell, float)
+        if len(shell) < 12 or m_band.sum() < 30:
+            continue
+        for sgn in (-1.0, 1.0):
+            sv = shell[np.sign(shell[:, 2] - mid) == sgn]
+            ms = m_band & (np.sign(z - mid) == sgn)
+            if len(sv) < 12 or ms.sum() < 20:
+                continue
+            xi = np.where(ms)[0]
+            # THE AUTOPOD ALLOCATION (cycle 65, allocation-before-condensation -- the foot-completion
+            # conviction: ~30-80 cells rode the whole ladder, below the level tests' noise floor).
+            # The autopod draws its measured complement from the limb's OWN pool -- distal
+            # proliferation supplies the Hox13 territory -- so instead of whatever the thin 12%% band
+            # holds, each autopod takes its N MOST-DISTAL limb cells (feet 420, hands 320; ~3%% of
+            # the limb column, negligible thinning).
+            order = xi[np.argsort(Q[xi, 0])]
+            band = order[: min(FLOOR, len(order))]
+            if len(band) < 8:
+                continue
+            take = band[np.arange(len(band)) % 10 < 7]      # ~70% populate; 30% stay for continuity
+            # THE SOX9 RAY HEAD (cycle 66): the old landing cycled cells across ALL shell verts
+            # interleaved -- geometrically spread but without ray identity, so the completion
+            # instrument read flickering noise. The condensation is made COHERENT: cells partition
+            # into 5 ML-contiguous groups (the lateral-inhibition ray identities) matched to the
+            # shell's 5 ML-contiguous digit tubes, and WITHIN each ray both cells and verts are
+            # ordered along the digit's long axis (proximal -> distal) -- the ray becomes a real
+            # condensation AND lays the ordered substrate the GDF5 segment interzones cut next.
+            zc_order = np.argsort(Q[take, 2])
+            sv_order = np.argsort(sv[:, 2])
+            jit = 0.006 * H
+            _NR = 5
+            cell_grp = np.array_split(zc_order, _NR)
+            vert_grp = np.array_split(sv_order, _NR)
+            for cg, vg in zip(cell_grp, vert_grp):
+                if len(cg) < 2 or len(vg) < 2:
+                    continue
+                ci = take[cg]
+                vv = sv[vg]
+                pd_c = np.argsort(Q[ci, 0])                  # proximal->distal by height
+                pd_v = np.argsort(vv[:, 0])
+                ci = ci[pd_c]
+                tgt = vv[pd_v][np.linspace(0, len(vg) - 1, len(ci)).astype(int)]
+                k = np.arange(len(ci))
+                off = np.stack([np.sin(k * 2.4) * jit, np.cos(k * 1.7) * jit,
+                                np.sin(k * 3.1) * jit], 1)
+                Q[ci] = Q[ci] + frac * ((tgt + off) - Q[ci])
+    return Q, hv, hf, fv, ff
 
 
 def _limb_grow_model(t, ext=1.5):
@@ -765,8 +1681,146 @@ def _chest(Q, reg_fate):
 # side) is concave.
 _CURL_SIGN = 1.0         # sign that makes the body concave toward the ventral (+y) side (chin-to-chest)
 
+_RIGID_IDS = None        # cached compact-organ family id sets for the curl's organ-rigid transport
 
-def fetal_curl(Q, curl, fate=None):
+
+def _rigid_family_ids():
+    global _RIGID_IDS
+    if _RIGID_IDS is None:
+        from medic.subhead_program import expand_names as _exn2
+        fams = [["Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow"],
+                ["Liver", "LiverHaem"], ["Kidney", "Nephron"], ["Lung"], ["Spleen"],
+                ["Stomach", "Duodenum"], ["Eye"], ["Otic"], ["Pancreas"]]
+        _RIGID_IDS = [[FIDX[n] for n in _exn2(f) if n in FIDX] for f in fams]
+        _RIGID_IDS = [ids for ids in _RIGID_IDS if ids]
+    return _RIGID_IDS
+
+
+def _ce_elong(t):
+    """Convergent-extension elongation schedule vs the global clock t (cycle 26, 2026-09-04).
+    The Carnegie reference is a LONG THIN body through the somite window (whole-body principal aspect
+    1:0.21-0.23 at CS10-11) where the model grew a fat cigar (1:0.40-0.48) -- Wnt-PCP convergent
+    extension (mediolateral intercalation driving axial elongation, the presomitic-mesoderm CDX2/HOX
+    program) peaks exactly there and the cloud growth lacked it. Volume-preserving AP stretch factor,
+    measured by A/B sweep against the staged references on the shipped frames (optima: CS08 ~1.35,
+    CS09 1.55, CS10 1.6-1.8, CS11 1.8-2.0, CS12 1.2-1.4, CS13 ~1.2): rises through the disc->somite
+    transition, peaks 1.9 at CS11, relaxes as the C closes and lateral/organ growth catches up (the
+    reference itself compacts to 1:0.40 by CS12). Deep-curl frames (t>0.24) taper conservatively --
+    the post-curl affine A/B is unreliable there (the deep-curl instrument law)."""
+    pts = [(0.000, 1.00), (0.045, 1.00), (0.090, 1.55), (0.112, 1.55), (0.168, 1.90),
+           (0.191, 1.90), (0.213, 1.35), (0.236, 1.20), (0.300, 1.00), (1.000, 1.00)]
+    xs, ys = zip(*pts)
+    return float(np.interp(t, xs, ys))
+
+
+def ce_stretch(Q, k, fate=None):
+    """Volume-preserving axial (AP) stretch: x*k, y,z/sqrt(k) about the centroid. ORGAN-RIGID
+    (the fetal_curl transport idiom): compact organ families ride the stretch -- their centroid
+    moves with the space but their internal shape is kept (CE elongates the axis by intercalation
+    in the axial/paraxial tissue; the heart does not stretch). Spanning structures (CNS, gut, skin,
+    somites) take the per-cell stretch -- they DO elongate. Measured on the shipped frames: affine
+    stretch cost the heart 94->82 at CS11 while organ-rigid held it at 92; the CNS gained +4-8
+    either way."""
+    if abs(k - 1.0) < 1e-3:
+        return Q
+    c = Q.mean(0)
+    S = (Q - c) * np.array([k, k ** -0.5, k ** -0.5]) + c
+    if fate is not None:
+        for ids in _rigid_family_ids():
+            m = np.isin(fate, ids)
+            if m.sum() < 8:
+                continue
+            S[m] = Q[m] - Q[m].mean(0) + S[m].mean(0)
+    return S
+
+
+_NEURULATE_IDS = None    # cached CNS ids for the neurulation tube contraction
+
+
+_MESO_KIDS = None
+
+
+def mesonephric_kidney(Q, fate, t):
+    """THE KIDNEY'S EMBRYONIC LADDER (cycle 35, 2026-09-04). The reference kidney at CS16-17 is the
+    MESONEPHROS -- a long thin paravertebral ridge (aspect 1:0.28:0.19 at CS16), a developmental
+    predecessor the model never grew (its kidney was a fat blob-pair, 1:0.66:0.52, trace 73); by
+    CS18 the reference compacts toward the metanephros (1:0.84:0.25) while the model was then TOO
+    stringy. Two clock-gated windows, family-as-ONE-body volume-preserving aspect reshape (A/B:
+    per-side loses to one-body at these stages -- the ridge complex reads as one mass):
+      WT1/PAX2 nephrogenic-cord ridge (1:0.33:0.15) in the CS16 window (t 0.30-0.35), then
+      GDNF-RET metanephric compaction (1:0.72:0.29) in the CS18 window (t 0.41-0.44).
+    CS17 measured transitional (no reshape helps -- gates ~0 there); CS20+ already 92, untouched.
+    A/B: CS16 73.1->82.5, CS18 83.3->87.8."""
+    global _MESO_KIDS
+    ga = max(0.0, 1.0 - abs(t - 0.325) / 0.035)             # CS16 window gate
+    gb = max(0.0, 1.0 - abs(t - 0.425) / 0.030)             # CS18 window gate
+    if ga < 0.05 and gb < 0.05:
+        return Q
+    if _MESO_KIDS is None:
+        from medic.subhead_program import expand_names as _exn4
+        _MESO_KIDS = [FIDX[n] for n in _exn4(["Kidney", "Nephron"]) if n in FIDX]
+    m = np.isin(fate, _MESO_KIDS)
+    if m.sum() < 30:
+        return Q
+    tgt = np.array((1.0, 0.33, 0.15)) if ga >= gb else np.array((1.0, 0.72, 0.29))
+    g = max(ga, gb)
+    Q = Q.copy()
+    c = Q[m].mean(0)
+    A = Q[m] - c
+    _, _, Vt = np.linalg.svd(A, full_matrices=False)
+    loc = A @ Vt.T
+    sds = loc.std(0) + 1e-12
+    sc = (tgt * sds[0]) / sds
+    sc /= sc.prod() ** (1 / 3)                              # volume-preserving
+    sc = 1.0 + g * (sc - 1.0)
+    Q[np.where(m)[0]] = c + (loc * sc) @ Vt
+    return Q
+
+
+def _neurulate_c(t):
+    """Neurulation tube-contraction schedule (cycle 27, 2026-09-04). The CS10 reference CNS is a thin
+    closed neural TUBE (dense ring cross-section around the canal + flared cranial folds) where the
+    model CNS is a fat solid slab -- the neural plate never narrowed. SHROOM3 apical constriction +
+    PCP-driven fold fusion contract the plate to the tube in the CS09-11 window; the contraction
+    RELEASES by CS13 as the brain vesicles expand (A/B: a persistent tube costs CS15 85->80).
+    Measured optima: CS10 c~0.45-0.5 (brain 74->79), CS11 c~0.65 (93.6->96.0), CS12+ neutral->hurts.
+    Returns the radial contraction factor (1.0 = no-op)."""
+    pts = [(0.000, 1.00), (0.105, 1.00), (0.125, 0.45), (0.150, 0.48), (0.175, 0.62),
+           (0.200, 0.75), (0.250, 1.00), (1.000, 1.00)]
+    xs, ys = zip(*pts)
+    return float(np.interp(t, xs, ys))
+
+
+def neurulate(Q, c, fate, nb=24):
+    """Contract CNS cells radially (DV+ML) toward their per-AP-bin centroid by factor c -- the
+    neural plate folding into the tube. Per-bin so the tube follows the body axis."""
+    global _NEURULATE_IDS
+    if c >= 0.999 or fate is None:
+        return Q
+    if _NEURULATE_IDS is None:
+        from medic.subhead_program import expand_names as _exn3
+        _NEURULATE_IDS = [FIDX[n] for n in _exn3(["Forebrain", "Telencephalon", "Midbrain",
+                          "Hindbrain", "Cerebellum", "OlfactoryBulb", "Spinal Cord",
+                          "Nervous System", "DRG"]) if n in FIDX]
+    m = np.isin(fate, _NEURULATE_IDS)
+    if m.sum() < 40:
+        return Q
+    Q = Q.copy()
+    x = Q[m, 0]
+    edges = np.linspace(x.min() - 1e-9, x.max() + 1e-9, nb + 1)
+    idxs = np.where(m)[0]
+    for j in range(nb):
+        bm = (x >= edges[j]) & (x < edges[j + 1])
+        if bm.sum() < 5:
+            continue
+        ii = idxs[bm]
+        cy, cz = Q[ii, 1].mean(), Q[ii, 2].mean()
+        Q[ii, 1] = cy + (Q[ii, 1] - cy) * c
+        Q[ii, 2] = cz + (Q[ii, 2] - cz) * c
+    return Q
+
+
+def fetal_curl(Q, curl, fate=None, sign=None):
     """Curl the body into the sagittal fetal C. ORIENTATION (fate given): a real fetal C has the DORSAL
     spine on the CONVEX (outer) back and the belly on the concave inside; the model's dorsal is at +y but
     the raw sign put the spine on the INSIDE (Miles: "folding with the spine inside"). So we compute the
@@ -808,9 +1862,38 @@ def fetal_curl(Q, curl, fate=None):
         out = np.empty_like(Q)
         out[:, :2] = Cc + dv * Nc
         out[:, 2] = z                                       # ML width carried unchanged
+        # ORGAN-RIGID TRANSPORT (cycle 21c): the per-AP-bin bend SHEARS any compact organ that spans
+        # bins -- but the body curls AROUND its organs (families move as families, in the posture
+        # layer). Each compact family rides the bend as one rigid body: its centroid moves to the bent
+        # axis position, its cells keep their internal shape, rotated into the local (tangent, normal)
+        # frame. Spanning structures (CNS, gut, skin, somites) keep the per-cell bend -- they DO curl.
+        if fate is not None:
+            for ids in _rigid_family_ids():
+                m = np.isin(fate, ids)
+                if m.sum() < 8:
+                    continue
+                xc, yc = float(Q[m, 0].mean()), float(Q[m, 1].mean())
+                sxc = float(np.clip((xc - ctr[0]) / L, 0, 1)) * (nb - 1)
+                j0 = int(sxc); j1 = min(j0 + 1, nb - 1); tc = sxc - j0
+                Tc = T[j0] * (1 - tc) + T[j1] * tc; Tc /= (np.linalg.norm(Tc) + 1e-9)
+                Nc0 = np.array([-Tc[1], Tc[0]])
+                cbent = (C[j0] * (1 - tc) + C[j1] * tc
+                         + (yc - float(np.interp(xc, ctr, axis))) * Nc0)
+                out[m, :2] = cbent + (Q[m, :2] - (xc, yc)) @ np.stack([Tc, Nc0])
         return out
 
+    if sign is not None:
+        # EXPLICIT sign (cycle 22, the final word on the flip saga): every per-frame detection --
+        # spine-reach (flickered) and then spine-side (unstable once proc's own flex() pre-bends the
+        # body) -- proved frame-dependent. The sign is NOT a per-frame question: in the sim frame
+        # dorsal = +y BY CONSTRUCTION of the fate map (neural fates commit at d > 0.46), so the belly
+        # is -y and the curl is concave toward -y, always. The caller passes it.
+        return _bend(float(sign))
     if fate is not None:
+        # MESH-PHASE auto-sign: the ORIGINAL spine-reach rule, restored (cycle 23 -- the 21d spine-side
+        # rewrite broke the historically-correct mesh/infant bend: Miles saw the infant arch BACKWARDS).
+        # The cloud path never reaches here (explicit sign=-1.0); this serves the registered mesh frames
+        # where the reach comparison has always picked the spine-outside bend correctly.
         spine = np.isin(fate, [FIDX[n] for n in ("Spinal Cord", "Nervous System", "Forebrain",
                                "Midbrain", "Hindbrain", "Cerebellum") if n in FIDX])
         if spine.sum() >= 8:
@@ -884,7 +1967,7 @@ def mature_for_display(P, fate, adult_len=3.2):
     Vitruvian body the movie renders -- not the raw un-matured build_base cloud (the 'insect'). `fate` = per-cell
     fate index (Limb Bud cells get grow_limbs; head fates get the head scaling)."""
     P = np.asarray(P, float)
-    headf = [FIDX[n] for n in _HEAD_FATES if n in FIDX]
+    headf = _head_ids()
     hm = np.isin(fate, headf)
     if hm.any() and P[hm, 0].mean() < np.median(P[:, 0]):        # orient head to +x (viewer convention)
         P = P.copy(); P[:, 0] = -P[:, 0]
@@ -892,11 +1975,12 @@ def mature_for_display(P, fate, adult_len=3.2):
     lb = FIDX.get("Limb Bud")
     if lb is not None:
         Q = grow_limbs(Q, fate == lb, _limb_grow_model(1.0, MATURE_SEARCHED["limb_ext"]),
-                       _limb_grow_model(1.0, MATURE_SEARCHED.get("leg_ext", MATURE_SEARCHED["limb_ext"])), pose=1.0)
+                       _limb_grow_model(1.0, MATURE_SEARCHED.get("leg_ext", MATURE_SEARCHED["limb_ext"])),
+                       pose=1.0, fate=fate)
     return Q * (adult_len / _long_axis_len(Q))
 
 
-def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
+def grow_limbs(Q, limb, grow, leg_grow=None, pose=None, fate=None):
     """Grow the limbs OUT from buds AND swing them down to a standing pose. `grow`/`leg_grow` set limb LENGTH
     (extension past the bud); `pose` in [0,1] sets the arms-down/legs-down ROTATION (0 = T-pose/splayed bud,
     1 = hanging at the side). Laid frame (x=AP head+x, z=ML).
@@ -915,7 +1999,12 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
     # A-POSE cap (2026-08-09): fully-down (pose_a=1) tucks the arms against the torso and the skin mesh ABSORBS
     # them -> "no arms". Arms-out (0) webs bat-wings. pose_a~0.55 = an A-pose (arms down-and-out with a gap):
     # distinct visible arms + minimal webbing (tested per-pose on the adult frame).
-    pose_a = 0.55 * float(np.clip(pose, 0.0, 1.0)) if pose is not None else float(np.clip(grow - 1.0, 0.0, 1.0))
+    # A-pose cap 0.55 -> 0.88 (2026-08-31, cycle 16d): 0.55 = a 49.5-degree SPLAY that threw the
+    # hands to |ML| ~0.40 at hip height -- "arms akimbo, hands floating at the hips" (Miles). The
+    # 0.55 cap predates the field densification; a near-vertical arm now skins fine (own column
+    # mass), and the canonical width profile (0.164 at the waist INCLUDING arms) assumes it.
+    # 0.88 -> ~79 degrees = ~11-degree abduction: hands land beside the thighs (~0.19 ML).
+    pose_a = 0.78 * float(np.clip(pose, 0.0, 1.0)) if pose is not None else float(np.clip(grow - 1.0, 0.0, 1.0))
     pose_l = float(np.clip(lg - 1.0, 0.0, 1.0)) if pose is None else float(np.clip(pose, 0.0, 1.0))
     if abs(grow - 1.0) < 1e-3 and abs(lg - 1.0) < 1e-3 and pose_a < 1e-3 and pose_l < 1e-3:
         return Q
@@ -929,6 +2018,20 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
     # (the wide shoulder spike). lat_thr sits past the shoulder breadth (~0.12 H half) so the girdle is kept.
     lat_thr = max(0.16 * Hh, 1.8 * w)
     arm = (apf >= 0.5) & (limb | (np.abs(z) > lat_thr))
+    # VISCERA NEVER RIDE THE ARM CAPTURE (2026-09-04, Miles: "that spleen is really stubborn at 50").
+    # The lateral capture is deliberately fate-blind so the arm's muscle/skin COVERING swings with the
+    # bud -- but it also catches any visceral cell a given build happens to place past lat_thr, and
+    # the Vitruvian reach then flings it to 0.44 H: this build's f51-52 spleen streak (trace 83->42,
+    # maxr 0.33 vs the 0.038 capsule; the chain audit pinned grow_limbs -- the family left
+    # mature_cloud a perfect capsuled tongue). The same bistability WAS cycle 24's "f52 4x streak".
+    # Compact organ families + the gut tube are excluded from the positional capture.
+    if fate is not None:
+        _visc = np.zeros(len(Q), bool)
+        for _vids in _rigid_family_ids():
+            _visc |= np.isin(fate, _vids)
+        _gv = [FIDX[n] for n in _exn(("Gut", "Hindgut", "Foregut", "Duodenum")) if n in FIDX]
+        _visc |= np.isin(fate, _gv)
+        arm &= ~_visc
     leg = limb & (apf < 0.5)
     body = ~(arm | leg)
     # NECK: seat the shoulders BELOW the head. The arm bud sits too high (its top reaches up to the jaw), so there
@@ -1001,7 +2104,12 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
         Hh = np.ptp(x) + 1e-9
         hipband = body & (np.abs(x - hipx0) < 0.06 * Hh)
         hipz = np.percentile(np.abs(z[hipband]), 70) if hipband.sum() > 8 else 0.85 * w   # the PELVIS half-width
-        hipz = float(np.clip(hipz, 0.055 * Hh, 0.085 * Hh))     # FLOOR + cap: the two legs must stay a real hip-width
+        # floor 0.055 -> 0.075 Hh (cycle 17): the measured line landed at 4.3% of FINAL stature --
+        # canonical mid-thigh centres sit at ~5.5-6.5% -- so the columns hugged the midline and no
+        # inter-thigh gap could beat the field smear no matter how clean the web. The floor now puts
+        # the line at the canonical thigh centre; with the condensation wall at 0.30x the line, the
+        # crotch gap is ~3%H = wide enough to surface.
+        hipz = float(np.clip(hipz, 0.075 * Hh, 0.085 * Hh))     # FLOOR + cap: the two legs must stay a real hip-width
         #                                                         apart (~0.11-0.17 H bi-femoral), not collapse to a
         #                                                         central spike (the "gown"/cone that reads as no legs).
         for sgn in (1.0, -1.0):
@@ -1018,23 +2126,74 @@ def grow_limbs(Q, limb, grow, leg_grow=None, pose=None):
             # tighten each leg toward its (tapered) column centre, keeping real thigh thickness (0.5, not 0.85 which
             # collapsed the legs to thin lines meeting at the midline).
             Q[m, 2] = hz_t + (z[m] - hz) * (1.0 - 0.5 * pose_l)
+            # LIMB CONDENSATION (cycle 17): the halved bud spread still left leg cells +-0.061 H about
+            # their line (measured 85th-pct residual) -- the leg's OWN cells crossed the midline and
+            # webbed the crotch shut up to ~25% of stature (the arm has _arm_tube for exactly this; the
+            # leg had only the relative tighten). The limb is a mesenchymal condensation about its own
+            # axis (SOX9): clamp the residual ML spread to 0.70x the column line -- the inner thigh
+            # wall lands at 0.30x the line off the midline, a real inter-thigh gap, tapering with it.
+            r_leg = 0.70 * np.abs(hz_t)
+            dz_l = Q[m, 2] - hz_t
+            Q[m, 2] = hz_t + dz_l + pose_l * (np.clip(dz_l, -r_leg, r_leg) - dz_l)
+        # THE LEG TUBE (polish cycle; the _arm_tube law, at last, for the legs): the leg's cell
+        # core was a twisted RIBBON -- per-side half-widths swinging 0.002-0.014 H with ML and DV
+        # inverting by height -- so the fat wrapped a blade and the shins read paper-thin from
+        # the side. The limb is a condensation about its own axis (SOX9): each leg redistributes
+        # into a solid tapering cylinder about its hip->ankle line, thigh ~0.040 H to the ankle.
+        if pose_l > 0.5:
+            HhF = np.ptp(Q[:, 0]) + 1e-9
+            for sgn in (1.0, -1.0):
+                m = leg & (np.sign(Q[:, 2]) == sgn)
+                if m.sum() >= 12:
+                    _arm_tube(Q, m, r0=0.040 * HhF, taper=0.60)
+        # THE THIGHS CLAIM THEIR TERRITORY (cycle 17): limb muscle is somitic myoblasts MIGRATING INTO
+        # the limb bud (PAX3/LBX1/c-Met, HGF-guided streams), and the femoral vessels and dermis sprout
+        # with the limb -- but the model's spanning leg-type fates stayed where the trunk envelope left
+        # them: the inter-thigh midline (census: 1,676 cells at 26-46% of stature within |ML|<3%H --
+        # Muscle 612, Vessel 257, Mesothelium 176, Skin 161...), so the crotch could not open above ~25%
+        # and the legs read fused/short even though the leg fate itself reaches 0.43-0.50. Below the
+        # groin, each cell of a migratory leg-type fate that is OUTSIDE both thigh columns joins its own
+        # side's column at its height. The gonads (perineal by anatomy) and the groin band just under
+        # the pelvic floor stay midline; the ankle/foot zone is left to the autopods.
+        if fate is not None and pose_l > 1e-3:
+            from medic.subhead_program import expand_names as _exnG
+            _mig = [FIDX[n] for n in _exnG(("Muscle", "Skin", "Adipose", "Vessel", "Blood",
+                                            "Connective", "Mesothelium", "Cavity")) if n in FIDX]
+            xg, zg = Q[:, 0], Q[:, 2]
+            groin = hipx0 - 0.02 * Hh
+            cand = (np.isin(fate, _mig) & ~limb & (xg < groin)
+                    & (xg > xg.min() + 0.10 * Hh))
+            if cand.any():
+                # The column line and its half-width are MEASURED off the placed leg cells (self-
+                # reading): line(lf) = the tightening target hz_t; half-width = the 85th-pct residual
+                # of the leg cells about their own line. (v1 guessed r=0.035H -- the guessed band
+                # covered the inter-thigh midline, 2/3 of the web tested "already in the column",
+                # and the spread floor even sent skirt cells INTO the midline. Measure, don't guess.)
+                _lfL = np.clip((hipx0 - xg[leg]) / (0.52 * Hh), 0.0, 1.0)
+                _lineL = hipz * (1.0 - 0.42 * _lfL * pose_l)
+                _res = np.abs(np.abs(zg[leg]) - _lineL)
+                r_th = float(np.clip(np.percentile(_res, 85), 0.010 * Hh, 0.035 * Hh))
+                lf_c = np.clip((hipx0 - xg[cand]) / (0.52 * Hh), 0.0, 1.0)
+                zc_mag = hipz * (1.0 - 0.42 * lf_c * pose_l)        # each side's leg line at this height
+                r_c = np.minimum(r_th, 0.70 * zc_mag)               # column radius, never past the condensation wall
+                inner_c = zc_mag - 1.05 * r_c                        # the compacted column's inner wall (>= 0.27 zc)
+                outer_c = zc_mag + 1.05 * r_c
+                zmag = np.abs(zg[cand])
+                web = (zmag < inner_c) | (zmag > outer_c)           # inter-thigh web, or the skirt
+                if web.any():
+                    ci = np.where(cand)[0][web]
+                    sgn_w = np.where(zg[ci] >= 0, 1.0, -1.0)
+                    u_w = (ci % 89) / 89.0                           # deterministic spread across the column
+                    tgt_mag = zc_mag[web] * (0.55 + 0.90 * u_w)     # land inside [0.55, 1.45] x the line
+                    Q[ci, 2] = zg[ci] + pose_l * (sgn_w * tgt_mag - zg[ci])
     return Q
 
 
 def _ventral_sign(Q, fate):
-    """The body's own anterior (ventral) DV sign, read off the cloud: the EYES sit on the front of the
-    head, so anterior = the DV direction from the brain toward the eyes (same rule flesh_skin uses).
-    Fallback: opposite the dorsal Notochord/Spinal Cord. Returns +1.0 or -1.0 on the laid-frame y axis."""
-    from medic.unified_embryo import FIDX
-    F = np.asarray(fate)
-    eye_ids = [FIDX[n] for n in ("Eye", "Retina") if n in FIDX]
-    brain_ids = [FIDX[n] for n in ("Forebrain", "Midbrain", "Hindbrain") if n in FIDX]
-    if eye_ids and brain_ids and np.isin(F, eye_ids).sum() > 8 and np.isin(F, brain_ids).sum() > 8:
-        return 1.0 if np.median(Q[np.isin(F, eye_ids), 1]) >= np.median(Q[np.isin(F, brain_ids), 1]) else -1.0
-    for nm in ("Notochord", "Spinal Cord"):
-        if nm in FIDX and (F == FIDX[nm]).sum() > 20:
-            return -1.0 if np.median(Q[F == FIDX[nm], 1]) >= np.median(Q[:, 1]) else 1.0
-    return 1.0
+    """The body's own anterior (ventral) DV sign -- delegates to the SHARED robust rule (heart-vs-cord
+    anchor, eye fallback) in flesh_surface_head, so the feet and the skin agree on which way is forward."""
+    from medic.flesh_surface_head import ventral_sign
+    return ventral_sign(Q, fate)
 
 
 def feet_mesh(Q, fate, frac=1.0):
@@ -1054,19 +2213,69 @@ def feet_mesh(Q, fate, frac=1.0):
     apf = (x - x.min()) / H
     leg = (np.asarray(fate) == LIMB) & (apf < 0.5)
     span = 0.055 * H
-    length = 0.14 * H * float(np.clip(0.15 + 0.85 * frac, 0.15, 1.0))   # autopod emerges late (Hox13)
+    # MEASURED foot (cycle 61, the gods-panel 48.3 row): canon foot length 0.152 of stature
+    # heel-to-toe (252/1656mm) with the ankle at the anatomical quarter-point -- the old shell built
+    # 0.14H FORWARD FROM THE ANKLE with no heel, and the landed cells read 0.073. The Hox13 autopod
+    # territory takes its measured extent: base shifted back by the heel, length to the full measure.
+    _ramp = float(np.clip(0.15 + 0.85 * frac, 0.15, 1.0))
+    length = 0.152 * H * _ramp
+    heel = 0.035 * H * _ramp
     dvsign = _ventral_sign(Q, fate)                          # toes FORWARD: anterior from the body's own eyes
     V, Fc, off = [], [], 0
     for sgn in (-1.0, 1.0):                                  # left (z<0), right (z>0)
         m = leg & (np.sign(z) == sgn)
         if m.sum() >= 6:
             legc = Q[m]
-            tip = legc[legc[:, 0] < np.percentile(legc[:, 0], 15)].mean(0)   # distal ankle
+            # TRUE-BOTTOM ANCHOR (cycle 16): the distal leg column is sparse, so the old bottom-15%
+            # mean landed at SHIN height (measured: feet at h 0.096-0.124, buried against the leg,
+            # anchored dorsal of its axis). Anchor at the lowest 3% of the leg -- the real ankle.
+            sel = legc[legc[:, 0] < np.percentile(legc[:, 0], 3)]
+            if len(sel) < 4:
+                sel = legc[np.argsort(legc[:, 0])[:6]]
+            tip = np.array([sel[:, 0].mean(), np.median(sel[:, 1]), sel[:, 2].mean()])
         else:
             tip = np.array([x.min(), 0.0, sgn * 0.10 * H])   # fallback: bud tip on this side
+        tip = tip - np.array([0.0, dvsign * heel, 0.0])      # the heel sits BEHIND the ankle
         v, f = HFS.build(tip, [0, dvsign, 0], [-1.0, 0, 0], span, length, "foot",
                          flip=(tip[2] * dvsign < 0))         # hallux medial on BOTH feet
         V.append(v); Fc.append(f + off); off += len(v)
+    return np.vstack(V).astype(np.float32), np.vstack(Fc).astype(np.int32)
+
+
+def hands_mesh(Q, fate, frac=1.0):
+    """Pentadactyl autopod at each ARM's distal tip (cycle 16) -- the mirror of feet_mesh, using the
+    same hand_foot_skin builder (kind='hand': thumb short, fingers long, wider fan). The arms hang
+    down (A-pose), so the hand continues the arm: fingers point DOWN (-x), the dorsum faces LATERAL
+    (palms toward the thigh -- the anatomical rest pose), and the thumb lands VENTRAL on both sides
+    via the chirality flip. Same schematic-autopod honesty note as the feet: digit count is the limb
+    head's pentadactyl default; per-digit morphogenesis is future work. Laid frame (x=AP head+,
+    y=DV, z=ML). Returns (verts, faces); `frac` ramps the autopod out with maturation (Hox13-late)."""
+    from medic import hand_foot_skin as HFS
+    x, z = Q[:, 0], Q[:, 2]
+    H = float(np.ptp(x)) + 1e-9
+    apf = (x - x.min()) / H
+    arm = (np.asarray(fate) == LIMB) & (apf >= 0.45)
+    span = 0.045 * H
+    length = 0.105 * H * float(np.clip(0.15 + 0.85 * frac, 0.15, 1.0))   # hand ~0.105 of stature
+    dvsign = _ventral_sign(Q, fate)
+    V, Fc, off = [], [], 0
+    for sgn in (-1.0, 1.0):                                  # left (z<0), right (z>0)
+        m = arm & (np.sign(z) == sgn)
+        if m.sum() >= 6:
+            armc = Q[m]
+            tip = armc[armc[:, 0] < np.percentile(armc[:, 0], 12)].mean(0)   # the wrist (arm hangs down)
+        else:
+            continue
+        # CLEAR OF THE THIGH (Miles: hands invisible): at 1cm voxels a hand AGAINST the thigh merges
+        # into its density mass and the surface swallows it -- the feet read because the toes project
+        # into open air. The relaxed hand hangs with a small gap beside the thigh: offset the anchor
+        # laterally (+0.022 H) and slightly forward, so the hand and fingers make their OWN surface.
+        tip = tip + np.array([0.0, dvsign * 0.010 * H, sgn * 0.015 * H])   # small clearance; near-vertical arm now
+        v, f = HFS.build(tip, [-1.0, 0, 0], [0, 0, sgn], span, length, "hand",
+                         flip=(sgn * dvsign < 0))            # thumb ventral on BOTH hands
+        V.append(v); Fc.append(f + off); off += len(v)
+    if not V:
+        return np.zeros((0, 3), np.float32), np.zeros((0, 3), np.int32)
     return np.vstack(V).astype(np.float32), np.vstack(Fc).astype(np.int32)
 
 
@@ -1087,15 +2296,18 @@ def _limb_grow(t):
 
 
 def _curl_amt(t):
-    """Developmental curl schedule vs the global clock t: straight while the body is still a ball,
-    ramp to a full fetal C as the embryo forms and through the handoff + early fetus, then unfurl
-    across the fetus->child window to a standing (straight) adolescent/adult."""
-    if t < 0.30:
-        return 0.0
-    if t < 0.55:
-        return (t - 0.30) / 0.25            # ramp up as the embryo takes shape
+    """Developmental curl schedule vs the global clock t. CYCLE 21b (2026-09-01, the CNS-slab look):
+    real embryos curl EARLY -- the Carnegie plates are maximally C-curled from CS13 (the cephalic +
+    caudal flexures close the C by t~0.26), and the old schedule only began curling at t=0.30, so the
+    whole embryonic window scored a straight slab CNS against a curled reference tube (the thin CNS is
+    the most curl-sensitive organ; the blob-like whole-body barely noticed). Rise CS10->CS13, full C
+    held through the embryonic window + handoff + early fetus, then the unchanged unfurl to standing."""
+    if t < 0.10:
+        return 0.0                          # disc/early somite stages: still flat
+    if t < 0.26:
+        return (t - 0.10) / 0.16            # CS10 -> CS13: the embryonic C closes
     if t < 0.68:
-        return 1.0                          # full fetal C: end of cloud, handoff, early fetus
+        return 1.0                          # full C: embryonic window, end of cloud, handoff, early fetus
     if t < 0.90:
         return max(0.0, 1.0 - (t - 0.68) / 0.22)   # unfurl fetus -> child
     return 0.0                              # standing adolescent / adult
@@ -1268,15 +2480,29 @@ def panel_mesh(t_local, morphing):
 
 
 # ---------------------------------------------------------------- build
-def _emit(Q, fate, vm, phase, stage, t, panel, ptype="genes", skin=None, skin_op=0.0):
+def _emit(Q, fate, vm, phase, stage, t, panel, ptype="genes", skin=None, skin_op=0.0, skin_f=None):
+    # NO growth-window turn (2026-09-02 final): the mesh phase was ALREADY belly=+y like the
+    # cloud (post continuity turn) and the anatomy reveal -- the -y reading that motivated a
+    # turn here was a deep-curl instrument artifact (belly-gap and flexion stats both lie on
+    # strongly curled frames; the straightening frames f72+ read correct). The real mesh
+    # fault was only the CURL sign (now +1.0, bending toward the +y belly). Renders judge
+    # curled frames; statistics only on straightened ones.
+    # 3-DECIMAL EMIT (cycle 33, 2026-09-04, THE QUANTIZATION COURT): the old round(x, 2) crushed
+    # small organs on small bodies -- at f51 the early-fetus body spans 0.93 units, the spleen's
+    # sds1 is 0.0133, so the family occupied ~3 grid steps and its 140 display cells collapsed
+    # onto coincident coordinates (median NN distance 0.0000; max exactly 0.0100 = the grid). The
+    # scorer read the ROUNDING, not the anatomy: f51 spleen 62.9 actual vs 84.7 for a same-sds
+    # gaussian control. The whole cloud phase (body 0.9 long) is in the same regime. ~12% JSON.
     d = dict(phase=phase, stage=stage, t=round(float(t), 3),
-             xyz=[round(float(x), 2) for x in Q.ravel()],
+             xyz=[round(float(x), 3) for x in Q.ravel()],
              vm=[round(float(x)) for x in vm],
              fate=[int(x) for x in fate],
              panel=panel, ptype=ptype)
     if skin is not None:                                    # per-frame skin-surface mesh verts (faces in doc)
-        d["skin"] = [round(float(x), 2) for x in np.asarray(skin).ravel()]
+        d["skin"] = [round(float(x), 3) for x in np.asarray(skin).ravel()]
         d["skin_op"] = round(float(skin_op), 2)
+        if skin_f is not None:                              # per-frame topology (the closed surface changes
+            d["skin_f"] = np.asarray(skin_f, int).tolist()  # its mesh as the body grows)
     return d
 
 
@@ -1335,6 +2561,11 @@ def build(source="model", json_path=None):
     hmask = np.isin(sym[-1][2], headf)
     if hmask.any() and proc[-1][hmask, 0].mean() < 0:
         proc = [np.stack([-Q[:, 0], Q[:, 1], Q[:, 2]], 1) for Q in proc]
+    # (cycle 23e ATTEMPTED a belly-to-+DV rotation here and REVERTED it same-day: the standing mesh
+    # frames measure viscera BELOW the CNS -- the mesh convention is ventral=-y, same as the sim frame,
+    # and the rotation introduced the very mismatch it meant to fix. The "adult ventral=+DV" read came
+    # from the heart-vs-skin-median statistic, which lies. Orientation verification lives in VIEWER
+    # SCREENSHOTS now, not projections -- see _viewer_shots.py.)
 
     def subsample(Q, V, F, fixed=None):
         idx = fixed if (fixed is not None and len(Q) > N_R) else _rep_idx(F, N_R, rng)   # representative draw
@@ -1353,11 +2584,44 @@ def build(source="model", json_path=None):
                                fixed=(S0_idx if fi == nfr - 1 else None))
         born, t_hpf, prc2 = frames[fi][0], frames[fi][1], frames[fi][2]
         t = T_A * fi / (nfr - 1)
+        Q = ce_stretch(Q, _ce_elong(t), F)                   # CE axial elongation (cycle 26): the
+        # somite-window body is long+thin (Wnt-PCP intercalation); organ-rigid, pre-curl.
+        Q = neurulate(Q, _neurulate_c(t), F)                 # neural plate -> tube (cycle 27):
+        # SHROOM3 apical constriction, CS09-11 window, released by CS13 (vesicles expand).
+        Q = mesonephric_kidney(Q, F, t)                      # the kidney's embryonic ladder
+        # (cycle 35): WT1/PAX2 mesonephric ridge at CS16, GDNF-RET compaction at CS18.
         Q = grow_limbs(Q, F == LIMB, _limb_grow(t))          # limb buds emerge small, not big paddles
-        Q = fetal_curl(Q, _curl_amt(t), F); Q = Q - Q.mean(0)   # curl (spine to the OUTSIDE) into the fetal C
+        Q = fetal_curl(Q, _curl_amt(t), F, sign=-1.0); Q = Q - Q.mean(0)   # curl into the fetal C.
+        # SIGN RECALIBRATED 2026-09-02 (Miles: "is our model curled with the heart inward or the
+        # spine inward?"): the side-view court (_curl_vs_canon_court.png) against the POST-ordinal,
+        # v3 skin-complete, organ-correspondence-ALIGNED canon showed +1.0 curling SPINE-INWARD --
+        # opposite the real specimens (heart always inside the C). The old f26 flip to +1.0 was
+        # calibrated against the pre-alignment canon and is superseded; -1.0 restores the
+        # construction derivation (sim dorsal=+y => concavity toward the belly at -y) AND matches
+        # the aligned canon. Mesh-phase calls stay -1.0 (one convention everywhere now).
+        Q[:, 1:] *= -1.0
+        # THE CONTINUITY TURN (2026-09-02, Miles: "the inward side of the model becomes the
+        # back of the adult"): rigid 180-deg AP turn of the emitted cloud so its belly matches
+        # the mesh phase's (+y) -- heart-inward is rotation-invariant so the recalibrated curl
+        # survives; the embryo's inward side becomes the adult's FRONT. The embryonic canon
+        # ladder turns in lockstep at export (see _cloud_canon_turn.py; canon_align runs after).
         stage = f"cloud · N={born:,} · {t_hpf:.0f} hpf · PRC2 {prc2:.2f}"
         out_frames.append(_emit(Q, F, V, "cloud", stage, t, panel_cloud(F, prc2, fi / (nfr - 1))))
     print(f"    {nfr} cloud frames")
+    # THE HONEST CENSUS (cycle 19): per-cloud-frame family counts on the FULL simulate cloud -- the
+    # frames' own fate arrays are the _rep_idx DISPLAY subsample (rare-fate lift alpha=0.32), which
+    # biases composition instruments (the cycle-8 lying-instrument class). stage_composition reads this.
+    _census = []
+    for fi in range(nfr):
+        _Ff = np.asarray(frames[fi][5])
+        _cnt = np.bincount(_Ff[_Ff >= 0], minlength=len(FATES))   # fid -1 = uncommitted (no fate yet)
+        _row = {FATES[k]: int(c) for k, c in enumerate(_cnt) if c}
+        _row["_uncommitted"] = int((_Ff < 0).sum())
+        _census.append(dict(frame=fi, born=int(frames[fi][0]), prc2=round(float(frames[fi][2]), 3),
+                            counts=_row))
+    json.dump(dict(note="full-cloud per-frame fate census (not the display subsample)",
+                   census=_census), open("data/movie/cloud_census.json", "w"))
+    print(f"    cloud census -> data/movie/cloud_census.json")
 
     # handoff source (locked; unordered -- the region-aware pairing below sets the correspondence)
     S0 = proc[-1][S0_idx]
@@ -1398,7 +2662,7 @@ def build(source="model", json_path=None):
             vm = np.full(N_R, NEUT)
             t = 0.55 + 0.07 * a
             Q = tuck_limbs(Q, reg_fate, _curl_amt(t))       # flex limbs into the fetal tuck
-            Q = fetal_curl(Q, _curl_amt(t), reg_fate)       # full fetal C through the handoff (spine outside)
+            Q = fetal_curl(Q, _curl_amt(t), reg_fate, sign=+1.0)       # fetal C toward the mesh belly (+y) -- RECALIBRATED 2026-09-02 (the old -1.0 bent the spine dorsally = Miles's wrong-way curl at the start of growth)
             anchor = (1 - s) * Q.mean(0) + s * _chest(Q, reg_fate)   # ramp centroid(cloud)->chest(mesh)
             Q = Q - anchor
             out_frames.append(_emit(Q, fate, vm, "handoff",
@@ -1418,7 +2682,7 @@ def build(source="model", json_path=None):
             Q *= tgt / _long_axis_len(Q)
             t = 0.62 + 0.38 * f
             Q = tuck_limbs(Q, reg_fate, _curl_amt(t))       # flex limbs into the fetal tuck early
-            Q = fetal_curl(Q, _curl_amt(t), reg_fate)       # fetal C (spine outside), unfurling toward the adult
+            Q = fetal_curl(Q, _curl_amt(t), reg_fate, sign=+1.0)       # fetal C toward the belly (+y), unfurling toward the adult -- RECALIBRATED 2026-09-02
             Q = Q - _chest(Q, reg_fate)                     # anchor the chest so it grows in place
             lab = next(l for thr, l in labels if f < thr)
             out_frames.append(_emit(Q, reg_fate, np.full(N_R, NEUT), "mesh",
@@ -1439,12 +2703,19 @@ def build(source="model", json_path=None):
         # adult SKIN and the REVEAL are one proportioned Vitruvian body instead of a blob + a splayed scatter.
         from medic.adult_persistence_audit import build_base as _build_base
         _Braw, _BFraw = _build_base(max(N_R, 30000))
-        _bidx = _rep_idx(_BFraw, N_R, rng)
-        B0 = _Braw[_bidx].astype(float); BF = _BFraw[_bidx]
+        # GEOMETRY runs on the FULL cloud (2026-08-31): the _rep_idx display subsample lifts rare
+        # fates (alpha=0.32), which over-draws the many small HEAD fates and under-draws the bulk
+        # leg/trunk fates -- fine for the dot display it was designed for, but the closed-surface
+        # skin turns that density distortion into SHAPE (giant head, thin legs, squat trunk), and
+        # the percentile-based mechanisms (hip width, chest anchor) mis-measure the body. The full
+        # cloud is the body; `sel` is only which cells get DRAWN as dots.
+        B0 = _Braw.astype(float); BF = _BFraw
         _hmB = np.isin(BF, headf)                            # orient the head to +x (same convention as the cloud)
         if _hmB.any() and B0[_hmB, 0].mean() < np.median(B0[:, 0]):
             B0[:, 0] = -B0[:, 0]
-        reg_fate = BF                                        # the build_base cloud's real fates ARE the identity
+        sel = _rep_idx(BF, N_R, rng)                         # DISPLAY subsample (rare organs stay visible)
+        BFd = BF[sel]
+        reg_fate = BFd                                       # the build_base cloud's real fates ARE the identity
         print(f"[C] model maturation: build_base cloud -> adult ({N_MESH} frames; unified with the reveal) ...")
         from medic.skin_shell_head import mesh as _skin_mesh   # the epidermal-boundary skin SURFACE
         from medic.flesh_surface_head import flesh_skin as _flesh_skin   # skin draped over MUSCLE+FAT, not bone
@@ -1456,33 +2727,51 @@ def build(source="model", json_path=None):
         limbmask = (BF == LIMB)
         for i in range(N_MESH):
             f = i / (N_MESH - 1)
-            Q = mature_cloud(B0, BF, f, MATURE_SEARCHED)     # searched allometry on the build_base cloud
+            Q = mature_cloud(B0, BF, f, MATURE_SEARCHED)     # searched allometry on the FULL build_base cloud
             t = 0.55 + 0.45 * f
             Q = grow_limbs(Q, limbmask, _limb_grow_model(t, MATURE_SEARCHED["limb_ext"]),
                            _limb_grow_model(t, MATURE_SEARCHED.get("leg_ext", MATURE_SEARCHED["limb_ext"])),
-                           pose=f)   # arms Vitruvian (out); legs stand; length capped
+                           pose=f, fate=BF)   # arms Vitruvian (out); legs stand; length capped
             tgt = 0.9 + (adult_len - 0.9) * f ** 1.2        # visible growth 0.9 -> 3.2 (convex)
             Q *= tgt / _long_axis_len(Q)
+            Q = standing_register(Q, BF, f)                 # the addresses are fractions of STANDING height
             Q = tuck_limbs(Q, BF, _curl_amt(t))             # fetal tuck early, releasing as it unfurls
-            Q = fetal_curl(Q, _curl_amt(t), BF)             # fetal C (spine to the OUTSIDE), unfurling to adult
+            Q = fetal_curl(Q, _curl_amt(t), BF, sign=+1.0)             # fetal C toward the belly (+y), unfurling to adult -- RECALIBRATED 2026-09-02
             Q = Q - _chest(Q, BF)                           # anchor the chest so it grows in place
+            # the autopods get REAL cells (frame 91) -- LAST transform, so the shells it derives
+            # and reuses in the skin field are anchored on the final frame geometry.
+            Q, _hv, _hf, _fv, _ff = populate_autopods(Q, BF, frac=f)
             lab = next(l for thr, l in labels if f < thr)
-            sv, sf = _flesh_skin(Q, BF)                      # skin draped over the MUSCLE+FAT (not the bone), so
-            #                                                  the muscle silhouette reads through the epidermal shell
-            sv, _ = _body_relief(sv, Q, BF, amp=f)           # the surface-muscle RELIEF (deltoid/pec/lat/glute/
-            #                                                  six-pack), blended by f -> smooth infant, muscled adult
-            n_flesh = len(sv)
-            fv, ff = feet_mesh(Q, BF, frac=f)                # genome-plausible autopod at each ankle (hallux medial)
-            sv = np.vstack([sv, fv])                         # feet join the skin surface (were bare stumps before)
-            if skin_faces is None:
-                skin_faces = np.vstack([sf, ff + n_flesh])   # fixed topology (flesh + both feet) -> store ONCE
+            # CLOSED-SURFACE skin (2026-08-30, render-gated winner): marching cubes over the flesh density
+            # field (body + bellies + fat + autopods in the field, so the skin wraps the toes) -- the slice
+            # shell could not represent CONCAVITY (armpit/crotch/chin), giving the capes / skirt / cone.
+            # Topology varies per frame -> emitted as fr.skin_f (mkSkin uses it over the global faces).
+            from medic.skin_closed_surface import closed_surface as _closed_surf, flesh_cloud as _flesh_cloud
+            # mid-frames at a lighter grid (the transitional surfaces peaked at 88k verts and blew the
+            # frames JSON to ~190 MB = a 30-60 s black screen in the viewer); the adult keeps full res.
+            # adult 170 -> 210 (cycle 17): the condensation crotch gap (~0.046 stature-units,
+            # ~3.8 ML-voxels at 170) sits at the resolution limit -- the gaussian bridged it and
+            # the legs fused above 24% no matter how clean the cells. At 210 the gap surfaces.
+            # GRID SCALES WITH BODY LENGTH (cycle 74, Miles's pick): the fixed mid-frame grid 126
+            # let the voxel grow 3.5x coarser as the body stretched to 3.2 -- cells/voxel dropped
+            # and the iso surface cut inside the sparse periphery (the mid-movie head lag,
+            # 18-30% of dots outside; the same-voxel adult was clean). The grid now holds the
+            # ADULT's voxel size (3.2/210) at every frame, capped at the adult grid; costs ~40MB
+            # of frames JSON (accepted over iso-widening's crotch-webbing risk).
+            _grid = int(np.clip(round(tgt / (3.2 / 210.0)), 126, 210))
+            if i >= N_MESH - 2:
+                _grid = 210
+            sv, sf = _closed_surf(_flesh_cloud(Q, BF, autopods=(_fv, _hv)),
+                                  grid=_grid, sigma=1.35, iso_frac=0.38, smooth_iters=12)
+            sv, _ = _body_relief(sv, Q, BF, amp=f)           # the surface-muscle RELIEF rides the new surface
             skin_op = 0.30 + 0.35 * f                        # skin firms up as the body matures
-            out_frames.append(_emit(Q, BF, np.full(N_R, NEUT), "mesh",
+            out_frames.append(_emit(Q[sel], BFd, np.full(N_R, NEUT), "mesh",
                                    f"model · {lab} (allometric maturation of the cell cloud)", t,
-                                   panel_mesh(f, morphing=(1 - f)), skin=sv, skin_op=skin_op))
-        Q_adult = Q                                         # the finished adult cloud (laid, centred)
-        _sa = _body_relief(_flesh_skin(Q_adult, BF)[0], Q_adult, BF, amp=1.0)[0]  # adult FLESHED + muscled skin (dissolves in the reveal)
-        skin_adult_v = np.vstack([_sa, feet_mesh(Q_adult, BF, frac=1.0)[0]])   # feet on the adult reveal skin too (match skin_faces)
+                                   panel_mesh(f, morphing=(1 - f)), skin=sv, skin_op=skin_op, skin_f=sf))
+            if i == N_MESH - 1:
+                skin_faces = sf                              # the ADULT topology = the global (anatomy phase)
+                skin_adult_v = sv
+        Q_adult = Q[sel]                                    # the finished adult cloud (laid, centred; display cells)
 
     # ---- Phase D: reveal the MODEL'S OWN integrated anatomy (its genome-derived systems, not the atlas) --
     print(f"[D] anatomy: adult skin -> the model's OWN integrated anatomy ({N_REVEAL} reveal + {N_HOLD} hold) ...")
@@ -1503,6 +2792,19 @@ def build(source="model", json_path=None):
                            V=_align(m["V"]).astype(np.float32).ravel().tolist(),
                            F=np.asarray(m["faces"], int).ravel().tolist())
                       for nm, m in organ_meshes.items()]
+        # PER-ORGAN RE-ANCHOR (frame-86, part 2 -- Miles caught the burst): the global affine
+        # cannot reconcile the assembly's proportions with the movie body region by region; the
+        # cephalic solids still stood 0.17-0.33 above the standing dome after the assembly was
+        # standing-registered. Each solid translates so its centroid sits on ITS OWN fate-family
+        # centroid in the revealed cloud (shape kept) -- every solid then pops in exactly where
+        # the body's cells are, by construction.
+        from medic.subhead_program import expand_names as _exnD
+        for _os in organ_surf:
+            _ids = [FIDX[n] for n in _exnD((_os["name"],)) if n in FIDX]
+            _mD = np.isin(reg_fate, _ids)
+            if _mD.sum() >= 8:
+                _OV = np.asarray(_os["V"], float).reshape(-1, 3)
+                _os["V"] = ((_OV - _OV.mean(0)) + Q_adult[_mD].mean(0)).astype(np.float32).ravel().tolist()
         # SPLAY FIX: bound the revealed anatomy inside Q_adult (the arms-down skin it dissolves from). The old
         # per-region _fit_atlas_to_model splayed the limbs (region mis-detection); clipping to the correct
         # arms-down silhouette keeps every part inside the body instead of radiating into a star.
@@ -1599,7 +2901,12 @@ VIEWER = r"""<!doctype html><html><head><meta charset="utf-8"><title>Genome → 
   #bar{position:fixed;bottom:12px;left:12px;right:334px;z-index:3;display:flex;align-items:center;gap:10px;
        background:#0d1017cc;padding:8px 12px;border-radius:9px}
   button{font:13px system-ui;background:#1b2130;color:#e2e8f0;border:1px solid #33405a;border-radius:6px;padding:4px 12px;cursor:pointer}
-  button.on{background:#2b6cb0;border-color:#2b6cb0}input[type=range]{flex:1}
+  button.on{background:#2b6cb0;border-color:#2b6cb0}
+  #sliderwrap{flex:1;position:relative;padding-bottom:13px}
+  #sliderwrap input[type=range]{width:100%;margin:0;display:block}
+  #ruler{position:absolute;left:0;right:0;bottom:0;height:12px;font:10px system-ui;color:#8091a8;pointer-events:none}
+  #ruler span{position:absolute;transform:translateX(-50%);font-variant-numeric:tabular-nums}
+  #fnum{min-width:64px;text-align:right;color:#7dd3fc;font:13px system-ui;font-variant-numeric:tabular-nums}
   .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
   #key{margin-top:5px}#key span{margin-right:10px;white-space:nowrap;font-size:11px}
 </style></head>
@@ -1622,7 +2929,11 @@ VIEWER = r"""<!doctype html><html><head><meta charset="utf-8"><title>Genome → 
 <div id="rows"></div></div>
 <div id="bar">
   <button id="play">⏸ pause</button>
-  <input id="slider" type="range" min="0" max="0" value="0" step="1">
+  <div id="sliderwrap">
+    <input id="slider" type="range" min="0" max="0" value="0" step="1">
+    <div id="ruler"></div>
+  </div>
+  <span id="fnum">0 / 0</span>
   <button id="mode" class="on">anatomy</button>
   <button id="rot">↻ auto-rotate</button>
 </div>
@@ -1646,13 +2957,15 @@ window.addEventListener('keydown',e=>{ if(e.key==='o'||e.key==='O'){ showOrgans=
 const UNC=[0.5,0.55,0.6];
 // the skin SURFACE: a translucent epidermal-boundary mesh (fixed topology; verts stream per frame). depthWrite
 // off so the internal cell cloud shows THROUGH the skin -- a body with a silhouette, not a scatter.
-function mkSkin(verts, op){
+function mkSkin(verts, op, ff){
   const n=verts.length/3, P=new Float32Array(n*3);
   for(let i=0;i<n;i++){ P[3*i]=verts[3*i+2]; P[3*i+1]=verts[3*i]; P[3*i+2]=verts[3*i+1]; }
-  if(!skinIdx){ skinIdx=[]; for(const f of DATA.skin_faces){ skinIdx.push(f[0],f[1],f[2]); } }
+  let idx;
+  if(ff){ idx=[]; for(const f of ff){ idx.push(f[0],f[1],f[2]); } }       // per-frame topology (closed surface)
+  else { if(!skinIdx){ skinIdx=[]; for(const f of DATA.skin_faces){ skinIdx.push(f[0],f[1],f[2]); } } idx=skinIdx; }
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(P,3));
-  g.setIndex(skinIdx); g.computeVertexNormals();
+  g.setIndex(idx); g.computeVertexNormals();
   const m=new THREE.MeshStandardMaterial({color:0xd8b49a, transparent:true, opacity:op,
     side:THREE.DoubleSide, roughness:0.9, metalness:0.0, depthWrite:false});
   return new THREE.Mesh(g,m);
@@ -1701,13 +3014,14 @@ function build(i){
   pts=[mk(bp,bc,0.013)]; if(hp.length) pts.push(mk(hp,hc,0.022));   // point-cloud cell sizes
   for(const p of pts) sc.add(p);
   if(skinMesh){ sc.remove(skinMesh); skinMesh.geometry.dispose(); skinMesh.material.dispose(); skinMesh=null; }
-  if(fr.skin && DATA.skin_faces && (fr.skin_op||0)>0.01){ skinMesh=mkSkin(fr.skin, fr.skin_op); sc.add(skinMesh); }
+  if(fr.skin && (fr.skin_f||DATA.skin_faces) && (fr.skin_op||0)>0.01){ skinMesh=mkSkin(fr.skin, fr.skin_op, fr.skin_f); sc.add(skinMesh); }
   clearOrgans();   // solid organ surfaces during the anatomy reveal (toggle with the 'o' key)
   if(showOrgans && fr.phase==='anatomy' && DATA.organ_surfaces){
     for(const os of DATA.organ_surfaces){ const o=mkOrgan(os.V, os.F, os.color, 0.85); organMeshes.push(o); sc.add(o); }
   }
-  document.getElementById('stage').textContent=fr.stage;
+  document.getElementById('stage').textContent='frame '+i+' — '+fr.stage;
   document.getElementById('slider').value=i;
+  document.getElementById('fnum').textContent=i+' / '+(nf-1);
   pA.className=fr.phase==='cloud'?'on':''; pB.className=fr.phase==='handoff'?'on':''; pC.className=fr.phase==='mesh'?'on':''; pD.className=fr.phase==='anatomy'?'on':'';
   document.getElementById('clkv').textContent=fr.t.toFixed(2)+'  ·  '+fr.phase;
   document.getElementById('clkf').style.width=Math.round(fr.t*100)+'%';
@@ -1776,6 +3090,12 @@ fetch(SRC).then(resp=>{
   DATA=d; vmin=d.vmin; vmax=d.vmax; nf=d.frames.length;
   if(d.display) document.querySelector('#ui b').textContent=d.display;
   document.getElementById('slider').max=nf-1;
+  // numbered play bar (Miles): ticks every 10 frames so a strange frame can be named exactly
+  { const rl=document.getElementById('ruler'); rl.innerHTML='';
+    const step=nf>220?20:10;
+    for(let k=0;k<nf;k+=step){ const s=document.createElement('span');
+      s.style.left=(100*k/(nf-1))+'%'; s.textContent=k; rl.appendChild(s); }
+    const e=document.createElement('span'); e.style.left='100%'; e.textContent=nf-1; rl.appendChild(e); }
   document.getElementById('key').innerHTML=KEY.map(k=>`<span><i class="dot" style="background:${k[1]}"></i>${k[0]}</span>`).join('');
   const R=d.R||2.0; cam.position.set(R*0.42,R*0.10,R*3.4); ctrl.target.set(0,0,0);  // front-on; pulled back so a tall figure's head+feet are not cropped
   cur=params.get('f')?Math.min(nf-1,Math.max(0,parseInt(params.get('f')))):0;

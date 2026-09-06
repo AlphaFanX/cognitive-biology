@@ -28,19 +28,24 @@ import matplotlib.pyplot as plt
 from medic.adult_persistence_audit import build_base
 from medic.unified_embryo import FIDX
 
-# canonical unit directions on the head sphere: (anterior+, superior+, lateral) -- lateral sign gives L/R.
-# The nearest-direction partition of the head's outer shell names each cranial bone.
+# canonical unit directions on the head, in the head's OWN axes = (SUPERIOR[+AP], ANTERIOR[-DV], LATERAL[ML]).
+# NB the body frame is x=AP (superior<->inferior), y=DV (anterior<->posterior); `dirs` below is built as
+# (AP, -DV_toward_face, ML) so +component = superior / anterior(face) / lateral. (The old PROTO transposed
+# anterior<->superior, which put nasal at the CROWN and frontal/parietal at the BACK.)
 PROTO = {
-    "frontal":     (0.55,  0.65, 0.00),
-    "parietal-R":  (-0.15, 0.75, 0.45), "parietal-L": (-0.15, 0.75, -0.45),
-    "occipital":   (-0.85, 0.25, 0.00),
-    "temporal-R":  (-0.20, -0.05, 0.80), "temporal-L": (-0.20, -0.05, -0.80),
-    "nasal":       (0.90,  0.05, 0.00),
-    "maxilla":     (0.85, -0.35, 0.00),
-    "mandible":    (0.70, -0.70, 0.00),
-    "zygomatic-R": (0.55, -0.10, 0.55), "zygomatic-L": (0.55, -0.10, -0.55),
+    "frontal":     (0.55,  0.55, 0.00),                          # forehead: superior + anterior
+    "parietal-R":  (0.75,  0.00, 0.45), "parietal-L": (0.75,  0.00, -0.45),  # vault: superior + lateral
+    "occipital":   (0.25, -0.85, 0.00),                          # back of head: mid-superior + POSTERIOR
+    "temporal-R":  (-0.10, 0.00, 0.85), "temporal-L": (-0.10, 0.00, -0.85),  # lower sides: inferior + lateral
+    "nasal":       (0.05,  0.90, 0.00),                          # mid-face: anterior
+    "maxilla":     (-0.35, 0.85, 0.00),                          # upper jaw: inferior + anterior
+    "mandible":    (-0.70, 0.55, 0.00),                          # lower jaw: inferior + anterior
+    "zygomatic-R": (-0.10, 0.55, 0.55), "zygomatic-L": (-0.10, 0.55, -0.55),  # cheek: anterior + lateral
 }
 NEURO = {"frontal", "parietal-R", "parietal-L", "occipital", "temporal-R", "temporal-L"}
+# canonical vault-bone COVERAGE (fraction of the neurocranium, from the isolated BodyParts3D bone meshes) -- the
+# target that sizes each AP positional-domain (frontal .21, both parietals .46, both temporals .16, occipital .18).
+COV = {"frontal": 0.21, "parietal": 0.46, "temporal": 0.16, "occipital": 0.18}
 
 
 def _dorsal_sign(base, F):
@@ -58,8 +63,19 @@ def build(base, F, shell_pct=50):
     FATE (the brain vesicles + neural crest the skull forms around) -- an AP cutoff over-captures the torso,
     because the matured body's AP is skewed (dense torso squeezed at the top, sparse long legs below).
     `shell_pct` = radius percentile above which a head cell is on the outer shell. Returns per-bone {part,side,P}."""
-    ids = [FIDX[n] for n in HEAD_FATES if n in FIDX]
-    head = base[np.isin(F, ids)] if ids else base[:0]
+    # CRANIAL CORE = the brain vesicles + eye + olfactory (unambiguously cranial). Neural Crest is DISTRIBUTED
+    # the whole length of the body (DRG, sympathetic, enteric, cardiac crest), so taking the whole fate spreads
+    # skull cells into the TRUNK -- include only the crest cells within the cranial AP band (the cranial crest).
+    CORE = ["Forebrain", "Telencephalon", "Midbrain", "Hindbrain", "Cerebellum", "Eye", "OlfactoryBulb"]
+    core_ids = [FIDX[n] for n in CORE if n in FIDX]
+    core_mask = np.isin(F, core_ids) if core_ids else np.zeros(len(base), bool)
+    if core_mask.sum() >= 20:
+        x = base[:, 0]; apf = (x - x.min()) / (np.ptp(x) + 1e-9)
+        cfloor = float(apf[core_mask].min()) - 0.03            # cranial AP floor (just below the vesicles)
+        crest = (F == FIDX["Neural Crest"]) & (apf >= cfloor) if "Neural Crest" in FIDX else np.zeros(len(base), bool)
+        head = base[core_mask | crest]
+    else:
+        head = base[core_mask]
     if len(head) < 20:                                            # fallback: the top few % of AP
         x = base[:, 0]; apf = (x - x.min()) / (np.ptp(x) + 1e-9)
         head = base[apf >= 0.92]
@@ -71,12 +87,36 @@ def build(base, F, shell_pct=50):
     r = np.linalg.norm(d, axis=1)
     shell = head[r >= np.percentile(r, shell_pct)]                # the cranial surface (where bone forms)
     R = np.linalg.norm(shell - c, axis=1).max() + 1e-9
-    # direction of each shell cell in (anterior, superior, lateral), unit-normalised
-    dirs = np.c_[(shell[:, 0] - c[0]), dsgn * (shell[:, 1] - c[1]), (shell[:, 2] - c[2])] / R
+    # direction of each shell cell in the head's own axes (SUPERIOR[+AP], ANTERIOR[toward face = away from the
+    # dorsal notochord], LATERAL[ML]), unit-normalised. dir[1] = -dsgn*(DV) so +dir[1] points at the FACE.
+    dirs = np.c_[(shell[:, 0] - c[0]), -dsgn * (shell[:, 1] - c[1]), (shell[:, 2] - c[2])] / R
     names = list(PROTO)
     protos = np.array([PROTO[n] for n in names])
     protos /= np.linalg.norm(protos, axis=1, keepdims=True) + 1e-9
-    assign = (dirs @ protos.T).argmax(1)                         # nearest canonical direction (dot product)
+    assign = (dirs @ protos.T).argmax(1)                         # nearest canonical direction (dot product) -- FACE
+    # ---- VAULT: GENOMIC AP positional-domain partition (replaces the equal-angle wedge for the neurocranium) ----
+    # The vault bones are patterned along the head's ANTERIOR axis (positional/Hox code), not by equal angles. The
+    # CORONAL suture (frontal|parietal) is the neural-crest(frontal)/mesoderm(parietal) LINEAGE boundary; the
+    # LAMBDOID (parietal|occipital) a posterior domain boundary; the SQUAMOUS suture the upper edge of the
+    # lateral-inferior temporal squama; the SAGITTAL suture the midline (parietal L|R). Each domain's EXTENT = the
+    # canonical bone COVERAGE (the same target-fraction sizing we use for organs) -> correct coverage + real sutures.
+    name2i = {n: i for i, n in enumerate(names)}
+    neuro_names = [n for n in names if n in NEURO]
+    ni = np.array([name2i[n] for n in neuro_names])
+    vmask = np.isin(assign, ni)
+    if vmask.sum() >= 12:
+        # ossification centres = the canonical bone DIRECTIONS (good arrangement), but each territory WEIGHTED so its
+        # coverage matches the canonical bone size (fixes occipital-too-big / frontal-too-small). A power diagram:
+        # additive offsets w iterated until each bone's share = its target coverage. Genomic = centre positions
+        # (positional code) + target sizes (the same fraction-sizing as organs); sutures = the weighted boundaries.
+        proj = dirs[vmask] @ protos[ni].T                        # cosine of each vault cell to each ossification centre
+        tgt = np.array([COV["frontal"] if n == "frontal" else COV["occipital"] if n == "occipital"
+                        else COV["parietal"] / 2 if "parietal" in n else COV["temporal"] / 2 for n in neuro_names])
+        w = np.zeros(len(ni))
+        for _ in range(40):                                      # tune territory weights to hit the canonical coverage
+            cov = np.bincount((proj + w).argmax(1), minlength=len(ni)) / len(proj)
+            w += 0.6 * (tgt - cov)
+        assign[np.where(vmask)[0]] = ni[(proj + w).argmax(1)]
     # the MIDLINE facial bones (nasal, maxilla, mandible) sit in the CENTRAL-lower face -- the Voronoi carve
     # over-claims wide lateral cells for them (the jaw ends up wider than the head), so confine them to a central
     # ML band about the head axis. A real mouth/jaw spans ~half the head width, not the whole of it.

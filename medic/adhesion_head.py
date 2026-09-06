@@ -172,6 +172,12 @@ _VISCERA = {"Heart", "Lung", "Liver", "LiverHaem", "Kidney", "Nephron", "Spleen"
             "Gut", "Bladder", "Pancreas", "Adrenal", "Thymus"}
 _CAP_FRAC = 0.020           # max total displacement per family, as a fraction of stature
 _TARGET_GAP = 0.5           # close a missing contact to this multiple of the pair's cell spacing
+# ANCHORED families (cycle 82): the bladder is held in the pelvis by the pubic symphysis, the pelvic
+# floor and the urachus -- a MIDLINE organ at a REGISTERED height. Once it had real cells (the cycle-82
+# allocation) the "small organ moves toward large" rule dragged it 0.05 stature LEFT and 0.05 UP toward
+# the gut coil, undoing the standing register. Per-family free-axis mask (AP, DV, ML): the bladder may
+# settle only in DV; its partners come to it.
+_FREE_AXES = {"Bladder": np.array([0.0, 1.0, 0.0])}
 
 
 def _family_masks(F):
@@ -245,6 +251,8 @@ def apply(Q, F, iters=3, verbose=True):
             report.append((pair, "close" if want else "open", round(gap / stat, 4)))
         moved = 0
         for n, v in moves.items():
+            if n in _FREE_AXES:
+                v = v * _FREE_AXES[n]                          # anchored family: only its free axes move
             nv = np.linalg.norm(v)
             if nv > cap:
                 v = v * (cap / nv)

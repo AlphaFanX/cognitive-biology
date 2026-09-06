@@ -167,7 +167,11 @@ bind_fates(FATES)                          # let organ_sprouting read a committe
 # COMPACT point-organ primordia that CONDENSE into a coherent mass (mesenchymal condensation) rather
 # than staying salt-and-pepper. NOT the spanning tubes (Gut/Notochord/Vessel) or segmented axial
 # structures (Cartilage/Rib/Muscle/DRG), which are meant to be extended, not condensed to a point.
-POINT_ORGANS = ("Eye", "Otic", "Heart", "Lung", "Liver", "Pancreas", "Kidney", "Spleen")
+POINT_ORGANS = ("Eye", "Otic", "Heart", "Lung", "Liver", "Pancreas", "Kidney", "Spleen", "Bladder")
+# Bladder joined the condensation loop in cycle 82 (2026-09-06): the FMA ledger read bladder 24 coded /
+# 0 completed -- build_base carried ~8 real cells (the 150 density floor cloned the rest) and the 120k
+# cloud carried NONE. It condenses + recruits like the Spleen (growth_program LADDER + FLOOR), once the
+# sprout seeds it (organ_sprouting.BLADDER germ now includes the yolk-sac lineage).
 # Spleen joined 2026-09-01 (cycle 23): it had NO growth law (the gut disease) -- its size was whatever
 # sprouting claimed, and the kidney-staged rebalance halved it (adult trace 84 -> 71). It condenses as
 # a single left-flank mass; its staged target is the representability floor (growth_program.FLOOR).

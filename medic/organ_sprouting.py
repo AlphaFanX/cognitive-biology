@@ -136,8 +136,17 @@ THYMUS  = dict(name="Thymus", unlock=0.36, ap_lo=0.14, ap_hi=0.26, dv=0.22, dv_t
 SPLEEN  = dict(name="Spleen", unlock=0.38, ap_lo=0.46, ap_hi=0.60, dv=0.32, dv_tol=0.13,
                lr=(0.10, 0.30), place="tube", germ={"Mesoderm", "Hypoblast"})
 # BLADDER: the urogenital-sinus endoderm/mesenchyme, caudal-ventral on the midline. Master Foxa1.
-BLADDER = dict(name="Bladder", unlock=0.34, ap_lo=0.78, ap_hi=0.90, dv=0.20, dv_tol=0.14,
-               lr=(0.00, 0.16), place="tube", germ={"Hypoblast", "Mesoderm"})
+#   GERM (cycle 82, 2026-09-06 -- the bladder never seeded at 120k): by its unlock (prc2 0.34) the
+#   caudal-ventral band holds 4-9 Hypoblast/Mesoderm cells (the gut tube has resorbed the ventral
+#   endoderm, the Connective head took the trunk mesoderm) -- below the 4-cell placement floor after the
+#   EXTRA organs ahead of it in the queue draw from the same pool; the 30k build got 20 cells by luck,
+#   the 120k cloud got 0 at every frame (cloud_census.json). The band IS full of the yolk-sac lineage
+#   (YSL 200-400 cells at 120k): the allantois is a caudal diverticulum of the yolk sac/hindgut and the
+#   urogenital sinus is cloacal endoderm, so the yolk-sac lineage is the bladder's real competence.
+#   close=0.33: the urorectal septum partitions the cloaca ONCE (CS15-17); one seeding event, then the
+#   growth-program floor (growth_program.FLOOR["Bladder"]) carries the family.
+BLADDER = dict(name="Bladder", unlock=0.34, close=0.33, ap_lo=0.78, ap_hi=0.90, dv=0.20, dv_tol=0.14,
+               lr=(0.00, 0.16), place="tube", germ={"Hypoblast", "Mesoderm", "Yolk Syncytial Layer"})
 EXTRA = [JAW, CHOROID, GONAD, BRANCHIAL, MESENTERY, BLOOD, ADRENAL, THYMUS, SPLEEN, BLADDER]
 
 _FATES = None
@@ -348,6 +357,13 @@ def sprout_organs(a, d, lrE, fid, prc2, ap_levels, dv_levels, mln=None,
     # cells the trunk organs and segments left free (lateral-inhibition exclusivity via `claimed`).
     for ex in EXTRA:
         if prc2 > ex["unlock"]:
+            continue
+        # SPROUT WINDOW (cycle 82): `claimed` resets every call, so an EXTRA organ whose germ pool is
+        # large keeps converting fresh germ cells on every step (the bladder on the yolk-sac lineage
+        # ran to 1,684 cells = 1.4% vs a measured ~0.01%). An organ with a `close` clock seeds ONCE,
+        # inside [close, unlock]; after that its size is the growth program's business (recruit +
+        # dilute), the way every ORGAN_SCHEDULE organ behaves once its germ is exhausted.
+        if prc2 < ex.get("close", -1.0):
             continue
         _place(ex["name"], None, _dv_target(ex["dv"], dv_levels), ex["place"], ex["germ"],
                ap_band=(ex["ap_lo"], ex["ap_hi"]), lr=ex.get("lr"))

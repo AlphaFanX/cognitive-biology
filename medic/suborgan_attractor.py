@@ -83,8 +83,15 @@ def gj_laplacian(pts, node_g=None, lab_idx=None, gate_low=0.04, k=10, align_pow=
 
 
 def fiedler(L):
+    # SEEDED START (cycle 82, the eigsh law): without v0 ARPACK starts from numpy's process-global
+    # random state -> the returned Fiedler vector (sign, and the basis inside a near-degenerate pair)
+    # differed call to call, in-process and cross-process; subhead_program's chain splits inherited it
+    # (the phase-bisect's first divergence in build_base). Seeded-random, not ones (ones is the
+    # Laplacian's null vector -- the cycle-79 catch).
+    n = L.shape[0]
     try:
-        vals, vecs = eigsh(L.astype(float), k=3, sigma=1e-8, which="LM")
+        vals, vecs = eigsh(L.astype(float), k=3, sigma=1e-8, which="LM",
+                           v0=np.random.default_rng(n).standard_normal(n))
         v = vecs[:, np.argsort(vals)][:, 1]
     except Exception:
         vals, vecs = np.linalg.eigh(L.toarray())

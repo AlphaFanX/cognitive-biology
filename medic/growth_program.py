@@ -55,8 +55,14 @@ LADDER = {
     # mismatch -- and MOSTA has no limb region label, so no staged whole-limb ladder exists yet).
     # Held flat across the window; a rising tail awaits a measured source.
     "Limb Bud": {"CS13": 0.047, "CS23": 0.047},
+    # BLADDER (cycle 82, 2026-09-06 -- the count strategy's first build-side allocation target: FMA
+    # ledger 24 coded / 0 completed). MEASURED urinary bladder proper (Amsterdam atlas, ordinal-fixed
+    # labels; _bladder_ladder.py): CS18 0.0121%, CS20 0.0079%, CS21 0.0164%, CS23 0.0058% of the
+    # labelled embryo -- the allantois/cloaca family is 10x larger but is not the organ. Every rung sits
+    # below the representability FLOOR, so the floor carries it (the Spleen precedent verbatim).
+    "Bladder": {"CS18": 0.00012, "CS20": 0.00008, "CS21": 0.00016, "CS23": 0.00006},
 }
-STAGED_FAMILIES = ("Heart", "Liver", "Kidney", "Spleen", "Limb Bud")
+STAGED_FAMILIES = ("Heart", "Liver", "Kidney", "Spleen", "Limb Bud", "Bladder")
 
 # REPRESENTABILITY FLOOR (cycle 23): the measured embryonic kidney is 0.3-0.6% of the embryo and the
 # spleen ~0.01% -- real, but below the model's cell-count resolution (a scoreable bean needs ~400
@@ -64,7 +70,10 @@ STAGED_FAMILIES = ("Heart", "Liver", "Kidney", "Spleen", "Limb Bud")
 # kidney's ~4x excess (1.6% -> ~0.8%) and holding the spleen at its scoreable size (the kidney-staged
 # rebalance halved it to 0.46% and the adult trace collapsed 84 -> 71). An honest instrument limit,
 # not anatomy.
-FLOOR = {"Kidney": 0.008, "Spleen": 0.007}
+FLOOR = {"Kidney": 0.008, "Spleen": 0.007,
+         # bladder: the 150-cell density floor expressed as a share of the 120k cloud (0.13%); the
+         # measured organ is ~0.01% = 12 cells at this resolution, unscorable (cycle 82).
+         "Bladder": 0.0013}
 
 _INTERP = {}
 

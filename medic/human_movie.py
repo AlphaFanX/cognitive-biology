@@ -881,7 +881,11 @@ def mature_cloud(Q, fate, f, params=None, register=True):
         _km = np.isin(fate, _kids)
         if _km.sum() >= 40:
             stat3 = np.ptp(Q[:, 0]) + 1e-9
-            mlm = float(np.median(Q[_km, 2]))
+            # CENTRE ON THE COLUMN, not on the family (cycle 82): the paravertebral gutters are defined
+            # about the vertebral column = the body's ML midline. The family's own median sat +0.017
+            # right of it (an uneven pair), so the left kidney landed short of its gutter (-0.023 vs
+            # +0.057) and straddled the midline; grays "paired" read midline mass 0.48 vs flank 0.50.
+            mlm = float(np.median(Q[:, 2]))
             for _sgn in (-1.0, 1.0):
                 sm = _km & ((Q[:, 2] - mlm) * _sgn >= 0)
                 if sm.sum() < 20:
@@ -1568,6 +1572,23 @@ def standing_register(Q, fate, f=1.0):
             _oc3 = np.abs(_off3) > _rw
             _mi3 = np.where(_ms)[0][_oc3]
             Q[_mi3, 2] = _line + np.sign(_off3[_oc3]) * 0.99 * _rw
+    # KIDNEY GUTTERS RE-ASSERTED (cycle 82; the frame law: every measured constant is defined on the
+    # STANDING body). The pair separation (114/1655 mm about the column) was applied in mature_cloud
+    # on the pre-scale stature and centred on the family's own median, and the conform / containment
+    # pulled the sides inward after it -- the left kidney ended at -0.045 vs the right at +0.111 and
+    # grays "paired" failed on the standing body. Each side lands at +-0.5 * sep about the body's ML
+    # midline (the column), moved as one body so the measured bean is kept; f-blended like every
+    # measured placement here.
+    _kids4 = [FIDX[n] for n in _exn(("Kidney", "Nephron")) if n in FIDX]
+    _km4 = np.isin(fate, _kids4)
+    if _km4.sum() >= 40:
+        _mid4 = float(np.median(Q[:, 2]))
+        for _sgn in (-1.0, 1.0):
+            _ms4 = _km4 & ((Q[:, 2] - _mid4) * _sgn >= 0)
+            if _ms4.sum() < 20:
+                continue
+            _tgt4 = _mid4 + _sgn * 0.5 * _KIDNEY_SEP_FRAC * _statc2
+            Q[_ms4, 2] += f * (_tgt4 - float(Q[_ms4, 2].mean()))
     return Q
 
 

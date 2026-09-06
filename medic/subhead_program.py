@@ -29,7 +29,14 @@ SPECS = [
     # Spinal cord: a chain along its own geodesic = the cranio-caudal neuraxis; the four levels are Hox-
     # colinear bands along it (thoracic the longest region). Orientation of the geodesic pole may flip;
     # the split is four ordered levels regardless, and they fold back into Spinal Cord for scoring.
-    dict(parent="Spinal Cord", family="chain", children=[
+    # orient=(axis, sign): the geodesic's rank-0 pole is fixed anatomically (cycle 82) -- the Fiedler vector
+    # is defined only up to sign, so without this the children flipped end-for-end between builds (the
+    # build_base nondeterminism the phase-bisect convicted). Sacral = caudal = low AP (head at +x).
+    # CORD = AXIS family (cycle 82): at 45k cells the cord's kNN Laplacian is not one connected chain, so
+    # its Fiedler vector was a component indicator, not the neuraxis -- Sacral and Cervical landed at the
+    # SAME height (x 0.856 vs 0.878 on the standing body). The Hox-colinear levels ARE bands along the
+    # cranio-caudal axis, and the build_base cord is straight (flex 0), so the axis split is the honest one.
+    dict(parent="Spinal Cord", family="axis", axis=0, children=[
         ("Sacral Cord",   0.00, 0.18, "Hoxd10/Hoxd12"),
         ("Lumbar Cord",   0.18, 0.42, "Hoxc10"),
         ("Thoracic Cord", 0.42, 0.72, "Hoxc8"),
@@ -38,19 +45,19 @@ SPECS = [
     # Liver: a chain along its transverse (left-right) long axis; the right lobe is the largest, the
     # caudate the smallest. A packed abdominal viscus -> the lobes inherit Liver's packing group and
     # fold back into the Liver composite, so the split adds names without moving the organ.
-    dict(parent="Liver", family="chain", children=[
+    dict(parent="Liver", family="chain", orient=(2, +1), children=[          # right lobe = +z (laterality sign)
         ("Caudate Lobe",  0.00, 0.14, "Tbx3"),
         ("Left Hepatic Lobe",  0.14, 0.42, "Hlx"),
         ("Right Hepatic Lobe", 0.42, 1.00, "Hlx"),
     ]),
     # Bladder: a chain along the supero-inferior axis; dome at the apex, trigone at the base/neck.
-    dict(parent="Bladder", family="chain", children=[
+    dict(parent="Bladder", family="chain", orient=(0, +1), children=[        # trigone inferior = low AP
         ("Bladder Trigone", 0.00, 0.25, "Tbx18/Shh"),
         ("Bladder Body",    0.25, 0.70, "Uroplakin"),
         ("Bladder Dome",    0.70, 1.00, "Shh"),
     ]),
     # Pancreas: a chain along its own long axis; head (duodenal) - body - tail (splenic).
-    dict(parent="Pancreas", family="chain", children=[
+    dict(parent="Pancreas", family="chain", orient=(2, -1), children=[       # head duodenal (right, +z) -> tail splenic (left, -z)
         ("Pancreatic Head", 0.00, 0.42, "Pdx1"),
         ("Pancreatic Body", 0.42, 0.75, "Pdx1"),
         ("Pancreatic Tail", 0.75, 1.00, "Pdx1"),
@@ -72,7 +79,7 @@ SPECS = [
         ("Gonadal Cortex",  0.50, 1.00, "Wnt4/Foxl2"),
     ]),
     # Foregut: the proximal gut tube as a chain -- oesophagus - stomach - duodenum from cranial to caudal.
-    dict(parent="Foregut", family="chain", children=[
+    dict(parent="Foregut", family="chain", orient=(0, -1), children=[        # oesophagus cranial = high AP
         ("Oesophagus",       0.00, 0.33, "Sox2"),
         ("Stomach",          0.33, 0.70, "Barx1"),
         ("Duodenum",         0.70, 1.00, "Pdx1"),
@@ -200,6 +207,15 @@ def apply(base, F, FIDX):
             r = np.argsort(np.argsort(v)).astype(float) / (len(v) - 1 + 1e-9)   # rank 0=low..1=high along axis
         else:                                                      # chain
             s = fiedler(gj_laplacian(pts, np.ones(len(pts))))
+            # POLE CONVENTION (cycle 82): a Fiedler vector is defined up to sign, and eigsh started from
+            # the process-global random state, so the geodesic's pole -- hence which end is child 0 --
+            # flipped between builds (in-process AND cross-process; the label multiset was identical,
+            # the assignment was not = the ORDER-ONLY signature). Anchor the pole to the spec's body
+            # axis: rank increases with sign * coordinate. fiedler() now also takes a seeded start.
+            oax, osg = sp.get("orient", (0, +1))
+            q = pts[:, oax]
+            if np.std(q) > 0 and np.std(s) > 0 and osg * np.corrcoef(s, q)[0, 1] < 0:
+                s = 1.0 - s
             r = np.argsort(np.argsort(s)).astype(float) / (len(s) - 1 + 1e-9)  # geodesic rank 0..1
         for (name, lo, hi, master) in sp["children"]:
             cid = FIDX.get(name)

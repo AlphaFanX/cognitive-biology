@@ -28,20 +28,34 @@ _PANC_DIR = np.array([0.22, 0.05, -0.95])   # laid frame (AP up, DV, ML; model l
 
 
 def bladder_vesicle(base, F):
-    fid = FIDX.get("Bladder")
-    if fid is None:
+    # THE FAMILY, not the parent label (cycle 82 -- families move as families): once the bladder has
+    # real cells (the cycle-82 allocation: 300+ at 120k, up from ~8), subhead_program splits them into
+    # Trigone / Body / Dome BEFORE this head runs, so `F == Bladder` found nothing (< 40) and the
+    # vesicle silently never formed -- grays hollow 0.00. The shell now takes every family cell.
+    from medic.subhead_program import expand_names
+    ids = [FIDX[n] for n in expand_names(["Bladder"]) if n in FIDX]
+    if not ids:
         return base
-    idx = np.where(F == fid)[0]
+    idx = np.where(np.isin(F, ids))[0]
     if len(idx) < 40:
         return base
+    fid = FIDX["Bladder"]
     stat = float(np.ptp(base[:, 0])) + 1e-9
     R = _BLADDER_R_FRAC * stat
     c = base[idx].mean(0)
     rng = np.random.default_rng(fid * 7919 + len(idx))
-    # uniform directions + shell radii in [0.75, 1.0] R (a sac wall with thickness)
-    u = rng.normal(size=(len(idx), 3))
-    u /= np.linalg.norm(u, axis=1, keepdims=True) + 1e-12
-    rr = R * (0.75 + 0.25 * rng.random(len(idx)) ** (1 / 3))
+    # ARRANGEMENT-PRESERVING shell: each cell keeps its own direction from the family centroid (so
+    # the trigone stays at the inferior pole and the dome at the superior one -- the chain split's
+    # order survives the reshaping); only cells sitting on the centroid get a seeded random direction.
+    # Radii by RANK of the cell's original depth in [0.75, 1.0] R (a sac wall with thickness).
+    d = base[idx] - c
+    n = np.linalg.norm(d, axis=1)
+    u = np.where(n[:, None] > 1e-9, d / (n[:, None] + 1e-12), 0.0)
+    deg = n <= 1e-9
+    if deg.any():
+        v = rng.normal(size=(int(deg.sum()), 3)); u[deg] = v / (np.linalg.norm(v, axis=1, keepdims=True) + 1e-12)
+    rank = np.argsort(np.argsort(n)).astype(float) / (len(n) - 1 + 1e-9)
+    rr = R * (0.75 + 0.25 * rank ** (1 / 3))
     base = base.copy()
     base[idx] = c + u * rr[:, None]
     return base

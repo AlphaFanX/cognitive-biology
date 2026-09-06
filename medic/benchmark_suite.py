@@ -37,7 +37,7 @@ import matplotlib
 matplotlib.use("Agg")           # metric modules save PNGs; never open a GUI
 import numpy as np
 
-SUITE_VERSION = "1.3"    # v1.3: tier A scores the MATURED STANDING specimen (mature_parts; the pre-standing
+SUITE_VERSION = "1.4"    # v1.4 (cycle 82c): canonical tier per-part crc32-seeded rng (one shared stream ran in str-hash order: +-0.3 between processes). v1.3: tier A scores the MATURED STANDING specimen (mature_parts; the pre-standing
                          # assembly gut/heart/kidney were un-matured blobs) + Gut/Heart identity checks
                          # recalibrated on the reference (see grays_scorecard). v1.2 tier C median over seeds.
 OUT_DIR = "data/benchmark"

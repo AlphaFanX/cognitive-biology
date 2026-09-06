@@ -84,6 +84,21 @@ SPECS = [
         ("Stomach",          0.33, 0.70, "Barx1"),
         ("Duodenum",         0.70, 1.00, "Pdx1"),
     ]),
+    # LARGE INTESTINE (cycle 82d; the count's next want: FMA large intestine 0/8). The model's Hindgut IS the
+    # whole colon: its cranial end joins the midgut (the a>=0.52 AP regionalisation), its caudal end is the
+    # cloaca/rectum, and in build_base it is a straight AP tube -- so the levels are AP bands, PROXIMAL at
+    # HIGH x (head at +x): orient=(0,-1). The fractions match human_movie._gut_coil's frame arc (ascending
+    # <0.30, transverse <0.62, descending <0.90, sigmoid), and the coil now orients its own rank the same
+    # way, so the labels ride the arc. Master genes = the colonic Hox/Cdx code (Cdx2 throughout, HOXA/D 9-13
+    # increasingly posterior; Hoxa13/Hoxd13 anorectal).
+    dict(parent="Hindgut", family="axis", axis=0, orient=(0, -1), children=[
+        ("Caecum",           0.00, 0.06, "Cdx2"),
+        ("Ascending Colon",  0.06, 0.30, "Cdx2/Hoxa9"),
+        ("Transverse Colon", 0.30, 0.62, "Cdx2/Hoxa10"),
+        ("Descending Colon", 0.62, 0.90, "Cdx2/Hoxd11"),
+        ("Sigmoid Colon",    0.90, 0.97, "Hoxd12"),
+        ("Rectum",           0.97, 1.00, "Hoxa13/Hoxd13"),
+    ]),
     # Lung: a BRANCHING TREE -> the five lobes (right superior/middle/inferior, left superior/inferior).
     # The relabel clusters the lung on its own branch modes; the primary order axis is medio-lateral so the
     # two lungs group, then cranio-caudal within each. (Which cluster maps to which lobe is best-effort.)
@@ -205,6 +220,8 @@ def apply(base, F, FIDX):
             # tegmentum) and medio-lateral parts (cerebellar vermis vs hemispheres) that no geodesic orders.
             v = pts[:, sp.get("axis", 1)]
             r = np.argsort(np.argsort(v)).astype(float) / (len(v) - 1 + 1e-9)   # rank 0=low..1=high along axis
+            if sp.get("orient", (0, +1))[1] < 0:                                 # orient sign: rank 0 at the HIGH end
+                r = 1.0 - r
         else:                                                      # chain
             s = fiedler(gj_laplacian(pts, np.ones(len(pts))))
             # POLE CONVENTION (cycle 82): a Fiedler vector is defined up to sign, and eigsh started from

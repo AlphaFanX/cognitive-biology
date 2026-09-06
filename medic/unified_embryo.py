@@ -1132,6 +1132,15 @@ def simulate(use_ecm=True, seed=0, verbose=False, n_start=None, n_end=None, limb
             disp[:, 2] *= lat_damp                       # damp the LATERAL (ML) spread -> narrow body at high pcp
             pos[:born] += disp
 
+        # (cycle 82f, measured and REVERTED: the digital-ray head was run here, after the relaxation, on
+        # the simulate cells. The paddle is a same-fate cadherin SPRING -- a 10%/step pull was restored
+        # completely between steps, 0.45-0.70 held only as a per-step force -- and moving the limb tips
+        # inside the growth loop perturbed the whole cascade downstream: canonical 77.3 -> 76.5, limb_bone
+        # 59.5 -> 55.6, muscle -1.7, grays 309 -> 306 with the kidney pairing lost, tier C 6/10 -> 4/10.
+        # The ladder head lives in the movie's cloud loop (human_movie.build, with mesonephric_kidney and
+        # neurulate) and the full-cloud instrument applies the same transform; a mechanically STABLE ray
+        # needs the precartilage fate change (SOX9 -> N-cadherin), the successor.)
+
         # FLEXURE HEAD: the cephalo-caudal C-curl, developing LATE (CE clock) toward the target angle.
         # Direction is dorsal-convex (our dorsal = +y, so _flex curls the tail ventrally), magnitude is
         # driven by the same convergent-extension program as the width/elongation, its angle anchored to

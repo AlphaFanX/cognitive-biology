@@ -45,38 +45,58 @@ def _autopod_cells(xyz, fate, LIMB, kind):
     return half & (x <= lo), half
 
 
-def _ray_count(P, side_z):
-    """Distinct ML columns among one foot's cells = the digital rays (density peaks)."""
-    if len(P) < 12:
-        return 0
-    z = P[:, 2]
-    hist, edges = np.histogram(z, bins=12)
-    thr = max(1.0, 0.25 * hist.max())
-    peaks = 0
-    up = False
+def _peaks(vals, bins, rel_thr, floor=0.0):
+    hist, _ = np.histogram(vals, bins=bins)
+    thr = max(floor, rel_thr * hist.max())
+    n, up = 0, False
     for v in hist:
         if v >= thr and not up:
-            peaks += 1; up = True
+            n += 1; up = True
         elif v < thr:
             up = False
-    return int(peaks)
+    return int(n)
 
 
-def _segments(P):
-    """PD density gaps along the foot's own long axis = joint interzones + 1."""
-    if len(P) < 12:
-        return 0
-    C = P - P.mean(0)
-    t = C @ np.linalg.svd(C, full_matrices=False)[2][0]
-    hist, _ = np.histogram(t, bins=10)
-    thr = 0.30 * hist.max()
-    segs, inseg = 0, False
-    for v in hist:
-        if v >= thr and not inseg:
-            segs += 1; inseg = True
-        elif v < thr:
-            inseg = False
-    return int(segs)
+def _bud_side(xyz, fate, LIMB, kind, sgn, body_c=None):
+    """One limb on one side: the kind-half's limb cells (foot = apf < 0.5, hand = apf >= 0.5) with
+    z on side `sgn` of the half's own ML median; the AUTOPOD = the distal 12% along the bud's OWN
+    principal axis, oriented away from the body centroid. FRAME-AGNOSTIC (cycle 82f): the old rule
+    took the lowest-x 12% of the half, which is the standing limb's distal end but, on the laterally
+    projecting embryonic paddle, only the CAUDAL edge of the limb half -- the ladder was being read
+    off the wrong cells at every cloud stage. Returns (autopod indices, bud axis)."""
+    x = xyz[:, 0]
+    apf = (x - x.min()) / (float(np.ptp(x)) + 1e-9)
+    half = (fate == LIMB) & ((apf < 0.5) if kind == "foot" else (apf >= 0.5))
+    if half.sum() < 30:
+        return np.zeros(0, int), None
+    zmed = float(np.median(xyz[half, 2]))
+    idx = np.where(half & (np.sign(xyz[:, 2] - zmed) == sgn))[0]
+    if len(idx) < 30:
+        return np.zeros(0, int), None
+    B = xyz[idx]
+    C = B - B.mean(0)
+    ax = np.linalg.svd(C, full_matrices=False)[2][0]
+    bc = xyz.mean(0) if body_c is None else np.asarray(body_c, float)
+    if float((B.mean(0) - bc) @ ax) < 0:
+        ax = -ax
+    t = C @ ax
+    return idx[t >= np.quantile(t, 0.88)], ax
+
+
+def _rays_segs(A, ax):
+    """(rays, segments) of one autopod: rays = density peaks across the FAN (the in-plane principal
+    axis of the autopod cells, perpendicular to the bud axis); segments = density runs along the bud
+    axis (joint interzones + 1). The old instrument histogrammed rays along ML and segments along the
+    cells' own PCA-1 -- right for a standing foot, wrong for the embryonic paddle and the hanging hand
+    (whose fan runs across DV)."""
+    if len(A) < 12:
+        return 0, 0
+    C = A - A.mean(0)
+    Cp = C - np.outer(C @ ax, ax)
+    fan = np.linalg.svd(Cp, full_matrices=False)[2][0]
+    rays = _peaks(Cp @ fan, 12, 0.25, floor=1.0)
+    segs = _peaks(C @ ax, 10, 0.30)
+    return rays, segs
 
 
 def run():
@@ -108,18 +128,16 @@ def run():
         if len(fate) != len(xyz):
             continue
         for kind in ("foot", "hand"):
-            fm, half = _autopod_cells(xyz, fate, LIMB, kind)
-            n = int(fm.sum())
-            plate = n >= 30
+            n = 0
             rays = seg = 0
-            sep = False
-            if plate:
-                for sgn in (-1.0, 1.0):
-                    m = fm & (np.sign(xyz[:, 2] - np.median(xyz[half, 2])) == sgn)
-                    if m.sum() >= 12:
-                        rays = max(rays, _ray_count(xyz[m], sgn))
-                        seg = max(seg, _segments(xyz[m]))
-                sep = rays >= 4
+            for sgn in (-1.0, 1.0):
+                A, ax = _bud_side(xyz, fate, LIMB, kind, sgn)
+                n += len(A)
+                if len(A) >= 12:
+                    r_, s_ = _rays_segs(xyz[A], ax)
+                    rays, seg = max(rays, r_), max(seg, s_)
+            plate = n >= 30
+            sep = plate and rays >= 4
             level = ("free-digits" if sep and seg >= 3 else "separation" if sep
                      else "segments" if seg >= 2 else "rays" if rays >= 3
                      else "plate" if plate else "none")
@@ -164,10 +182,13 @@ def run_full(cache="data/organ_cascade/autopod_full_frames.npz"):
                              convergent_ext=1.0, limb_params=LIMB_SEARCHED,
                              fate_params=fate_map_for(CLOUD_N))
         packs = []
+        from medic.digital_ray_head import apply_frame as _digital_rays_frame
         for born, _t, prc2, P, V, F in frames:
             if prc2 > 0.42:
                 continue                                    # pre-autopod window
             Ps, _Vs, Fs = _symmetrize(P, V, F)
+            Ps = np.asarray(Ps, np.float64)
+            _digital_rays_frame(Ps, np.asarray(Fs), float(prc2), LIMB)   # the movie's own ladder head, same frame
             lm = np.asarray(Fs) == LIMB
             packs.append(dict(prc2=float(prc2), n_cloud=len(Ps),
                               xr=(float(Ps[:, 0].min()), float(Ps[:, 0].max())),
@@ -182,28 +203,25 @@ def run_full(cache="data/organ_cascade/autopod_full_frames.npz"):
         if cs < 13:
             continue
         x0, x1 = pk["xr"]
-        H = (x1 - x0) + 1e-9
         Lxyz = pk["limb_xyz"]
-        apf = (Lxyz[:, 0] - x0) / H
+        # the cache holds limb cells only: the body's AP range is xr, its centroid ~ (mid-x, limb mean y,
+        # the symmetrised midline z=0); _bud_side reads apf off the limb cells' own x, so pin the range
+        # by appending the two body-extent anchors as non-limb fate rows
+        anchors = np.array([[x0, Lxyz[:, 1].mean(), 0.0], [x1, Lxyz[:, 1].mean(), 0.0]], np.float32)
+        xyz_ = np.vstack([Lxyz, anchors])
+        fate_ = np.concatenate([np.full(len(Lxyz), LIMB), np.full(2, -1)])
+        body_c = np.array([0.5 * (x0 + x1), float(Lxyz[:, 1].mean()), 0.0])
         for kind in ("foot", "hand"):
-            half = (apf < 0.5) if kind == "foot" else (apf >= 0.5)
-            if half.sum() < 30:
-                fm = np.zeros(len(Lxyz), bool)
-            else:
-                lo = np.percentile(Lxyz[half, 0], 12)
-                fm = half & (Lxyz[:, 0] <= lo)
-            n = int(fm.sum())
-            plate = n >= 30
+            n = 0
             rays = seg = 0
-            sep = False
-            if plate:
-                zmed = float(np.median(Lxyz[half, 2]))
-                for sgn in (-1.0, 1.0):
-                    m = fm & (np.sign(Lxyz[:, 2] - zmed) == sgn)
-                    if m.sum() >= 12:
-                        rays = max(rays, _ray_count(Lxyz[m], sgn))
-                        seg = max(seg, _segments(Lxyz[m]))
-                sep = rays >= 4
+            for sgn in (-1.0, 1.0):
+                A, ax = _bud_side(xyz_, fate_, LIMB, kind, sgn, body_c=body_c)
+                n += len(A)
+                if len(A) >= 12:
+                    r_, s_ = _rays_segs(xyz_[A], ax)
+                    rays, seg = max(rays, r_), max(seg, s_)
+            plate = n >= 30
+            sep = plate and rays >= 4
             level = ("free-digits" if sep and seg >= 3 else "separation" if sep
                      else "segments" if seg >= 2 else "rays" if rays >= 3
                      else "plate" if plate else "none")

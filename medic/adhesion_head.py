@@ -183,9 +183,9 @@ _FREE_AXES = {"Bladder": np.array([0.0, 1.0, 0.0])}
 def _family_masks(F):
     """Model organ-family masks at the same folding the trace uses (grays composites)."""
     from medic.unified_embryo import FIDX
-    from medic.subhead_program import composites as _sub_comp
+    from medic.subhead_program import composites as _sub_comp, children_of
     comps = {"Heart": ("Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow"),
-             "Gut": ("Gut", "Foregut", "Hindgut")}
+             "Gut": ("Gut", "Foregut", "Hindgut", *children_of("Hindgut"))}   # colon subheads ride with the Gut (cycle 82d)
     comps.update(_sub_comp())
     children = {c for parts in comps.values() for c in parts[1:]}
     masks = {}

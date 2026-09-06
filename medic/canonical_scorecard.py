@@ -13,7 +13,7 @@ Run:  cd cognimed && venv_win_new/Scripts/python.exe -m medic.canonical_scorecar
 Out:  data/organ_cascade/canonical_scorecard.json  (+ printed table)
 """
 from __future__ import annotations
-import os, json, zipfile, collections
+import os, json, zipfile, collections, zlib
 import numpy as np
 
 from medic.canonical_atlas import d2_signature, _sub, _vtk_points, load_bp3d, descriptors, MDIR
@@ -59,8 +59,20 @@ def run(R=None):
         canon = load_spec(spec)
         if len(canon) < 20:
             n_skip += 1; continue
-        cs, os_ = _sub(canon, 4000, rng), _sub(P, 4000, rng)
-        d2 = float(1.0 - 0.5 * np.abs(d2_signature(cs, rng) - d2_signature(os_, rng)).sum())
+        # PER-PART SEEDED STREAM (cycle 82c, SUITE v1.4): one shared `rng` consumed in loop order made a
+        # part's D2 depend on everything scored before it -- and some upstream iteration runs in str-hash
+        # order, so identical bodies scored +-0.3 apart between processes (PYTHONHASHSEED=0 twice ->
+        # identical; seed 1 -> autopod 56.4 vs 55.5). crc32(part key) = the canon_frame_score v2 idiom.
+        prng = np.random.default_rng(zlib.crc32(key.encode("utf-8")))
+        # ORDER-INVARIANT (cycle 82c, the second half): the per-part stream alone left autopod / organ /
+        # shoulder wobbling across hash seeds while every one of the 335 part clouds hashed identical
+        # (_part_hash82.py) -- the canonical MESH loaders hand back their points in a hash-dependent
+        # order, and D2 draws index pairs. Lexsort both clouds first: the score becomes a pure function
+        # of the two point SETS.
+        canon = canon[np.lexsort(np.round(canon, 9).T[::-1])]
+        P = P[np.lexsort(np.round(P, 9).T[::-1])]
+        cs, os_ = _sub(canon, 4000, prng), _sub(P, 4000, prng)
+        d2 = float(1.0 - 0.5 * np.abs(d2_signature(cs, prng) - d2_signature(os_, prng)).sum())
         results.append(dict(part=key, cat=cat, src=spec[0], ref=spec[-1], pct=round(100 * d2, 1),
                             canonical=descriptors(cs), ours=descriptors(os_)))
         cat_scores[cat].append(d2)

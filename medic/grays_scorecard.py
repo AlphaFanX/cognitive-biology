@@ -414,9 +414,12 @@ def collect_all_parts(R):
     if base is not None and F is not None:
         present = {k for k in FIDX if (F == FIDX[k]).sum() >= 8}
         R["_organ_present"] = present
+        from medic.subhead_program import composites as _sub_comp, children_of    # sub-head PROGRAM: children fold into their organ
+        # Gut = the intestines: midgut + the colon WITH its subheads (cycle 82d: the Hindgut splits into
+        # caecum..rectum; without children_of the colon fell out of the Gut identity check). The stomach
+        # family stays its own organ (Foregut's children are not intestines).
         composites = {"Heart": ("Heart", "Atrium", "Ventricle", "Left Ventricle", "Right Ventricle", "Outflow"),
-                      "Gut": ("Gut", "Foregut", "Hindgut")}
-        from medic.subhead_program import composites as _sub_comp    # sub-head PROGRAM: children fold into their organ
+                      "Gut": ("Gut", "Foregut", "Hindgut", *children_of("Hindgut"))}
         composites.update(_sub_comp())
         _sub_children = {c for parts in composites.values() for c in parts[1:]}
         for organ, idx in FIDX.items():

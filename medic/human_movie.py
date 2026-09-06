@@ -1299,7 +1299,16 @@ def _gut_coil(Q, fate, f):
     c3 = P3.mean(0)
     A3 = P3 - c3
     _, _, Vt3 = np.linalg.svd(A3, full_matrices=False)
-    t3 = np.argsort(np.argsort(A3 @ Vt3[0])) / max(cm.sum() - 1, 1)
+    proj3 = A3 @ Vt3[0]
+    # PROXIMAL POLE (cycle 82d): the tube's principal axis has an arbitrary sign; the caecum end is the
+    # CRANIAL end of the model's hindgut (it joins the midgut at a>=0.52) = high x in the registered
+    # family -> t3 = 0 there, so the subhead labels (subhead_program: Hindgut axis split, rank 0 at
+    # high x) and the arc segments (ascending < 0.30 < transverse < 0.62 < descending < 0.90 < sigmoid)
+    # name the same cells; the caecum lands lower right, the rectum at the midline (the 270-degree
+    # midgut rotation's end state).
+    if np.corrcoef(proj3, P3[:, 0])[0, 1] > 0:
+        proj3 = -proj3
+    t3 = np.argsort(np.argsort(proj3)) / max(cm.sum() - 1, 1)
     edge = half_ml * (1.0 + margin)
     tx3 = np.empty(cm.sum()); tml3 = np.empty(cm.sum())
     a_seg = t3 < 0.30                                      # ascending: right edge, bottom -> top
@@ -1619,10 +1628,12 @@ def populate_autopods(Q, fate, frac=1.0):
         shell = np.asarray(shell, float)
         if len(shell) < 12 or m_band.sum() < 30:
             continue
+        from medic.hand_foot_skin import NV as _NV, _NDIG as _ND, _NRING as _NRG, _NSIDE as _NS
+        _blocks = [shell[b:b + _NV] for b in range(0, len(shell) - _NV + 1, _NV)]   # one fixed-layout block per side
         for sgn in (-1.0, 1.0):
-            sv = shell[np.sign(shell[:, 2] - mid) == sgn]
             ms = m_band & (np.sign(z - mid) == sgn)
-            if len(sv) < 12 or ms.sum() < 20:
+            blk = next((B for B in _blocks if np.sign(B[:, 2].mean() - mid) == sgn), None)
+            if blk is None or ms.sum() < 20:
                 continue
             xi = np.where(ms)[0]
             # THE AUTOPOD ALLOCATION (cycle 65, allocation-before-condensation -- the foot-completion
@@ -1643,25 +1654,48 @@ def populate_autopods(Q, fate, frac=1.0):
             # shell's 5 ML-contiguous digit tubes, and WITHIN each ray both cells and verts are
             # ordered along the digit's long axis (proximal -> distal) -- the ray becomes a real
             # condensation AND lays the ordered substrate the GDF5 segment interzones cut next.
-            zc_order = np.argsort(Q[take, 2])
-            sv_order = np.argsort(sv[:, 2])
-            jit = 0.006 * H
-            _NR = 5
-            cell_grp = np.array_split(zc_order, _NR)
-            vert_grp = np.array_split(sv_order, _NR)
-            for cg, vg in zip(cell_grp, vert_grp):
-                if len(cg) < 2 or len(vg) < 2:
-                    continue
-                ci = take[cg]
-                vv = sv[vg]
-                pd_c = np.argsort(Q[ci, 0])                  # proximal->distal by height
-                pd_v = np.argsort(vv[:, 0])
-                ci = ci[pd_c]
-                tgt = vv[pd_v][np.linspace(0, len(vg) - 1, len(ci)).astype(int)]
-                k = np.arange(len(ci))
-                off = np.stack([np.sin(k * 2.4) * jit, np.cos(k * 1.7) * jit,
-                                np.sin(k * 3.1) * jit], 1)
-                Q[ci] = Q[ci] + frac * ((tgt + off) - Q[ci])
+            # THE DIGIT-LABELLED LANDING (cycle 82e; the ray head's open rung). The cycle-66 landing
+            # split cells AND verts into five groups by ML order -- but the digit tubes overlap in ML
+            # (and the hand's fan runs across DV, palm toward the thigh), so the groups smeared across
+            # tubes and the completion instrument read PLATE at every stage, RAYS NEVER. hand_foot_skin
+            # has a FIXED layout (5 digits x 3 rings x 6 sides, then a 12-vert palm), so every shell
+            # vertex carries its digit and its ring by index. Per side: the most PROXIMAL quarter of
+            # the cells (along the mean digit direction) becomes the palm/sole = the metacarpal/tarsal
+            # mass; the rest split into five contiguous groups along the FAN axis (PCA-1 of the digit
+            # centroids) and land on the digit at the same fan position, ordered along THAT digit's
+            # own axis, ring 0 -> ring 2 = proximal -> distal. The rings are the phalangeal segments
+            # the GDF5 interzones name next.
+            dig = [blk[d * _NRG * _NS:(d + 1) * _NRG * _NS] for d in range(_ND)]
+            palm = blk[_ND * _NRG * _NS:]
+            cen = np.array([d_.mean(0) for d_ in dig])
+            axes = np.array([d_[(_NRG - 1) * _NS:].mean(0) - d_[:_NS].mean(0) for d_ in dig])
+            out_ax = axes.mean(0); out_ax = out_ax / (np.linalg.norm(out_ax) + 1e-12)
+            _, _, Vf = np.linalg.svd(cen - cen.mean(0), full_matrices=False)
+            fan_ax = Vf[0]
+            jit = 0.004 * H
+            prox = Q[take] @ out_ax
+            o = np.argsort(prox)
+            n_palm = max(4, int(0.25 * len(take)))
+            palm_c, digit_c = take[o[:n_palm]], take[o[n_palm:]]
+            pv = palm[np.argsort(palm @ out_ax)]
+            tgtp = pv[np.linspace(0, len(pv) - 1, len(palm_c)).astype(int)]
+            kk = np.arange(len(palm_c))
+            offp = np.stack([np.sin(kk * 2.4), np.cos(kk * 1.7), np.sin(kk * 3.1)], 1) * jit
+            Q[palm_c] = Q[palm_c] + frac * ((tgtp + offp) - Q[palm_c])
+            if len(digit_c) >= 2 * _ND:
+                cgs = np.array_split(np.argsort(Q[digit_c] @ fan_ax), _ND)
+                dorder = np.argsort(cen @ fan_ax)
+                for g, d in zip(cgs, dorder):
+                    if len(g) < 1:
+                        continue
+                    ci = digit_c[g]
+                    ax = axes[d] / (np.linalg.norm(axes[d]) + 1e-12)
+                    ci = ci[np.argsort(Q[ci] @ ax)]                       # proximal -> distal along this digit
+                    vv = dig[d]                                           # ring-major: proximal -> distal
+                    tgt = vv[np.linspace(0, len(vv) - 1, len(ci)).astype(int)]
+                    k = np.arange(len(ci))
+                    off = np.stack([np.sin(k * 2.4), np.cos(k * 1.7), np.sin(k * 3.1)], 1) * jit
+                    Q[ci] = Q[ci] + frac * ((tgt + off) - Q[ci])
     return Q, hv, hf, fv, ff
 
 
@@ -2612,6 +2646,14 @@ def build(source="model", json_path=None):
         Q = mesonephric_kidney(Q, F, t)                      # the kidney's embryonic ladder
         # (cycle 35): WT1/PAX2 mesonephric ridge at CS16, GDNF-RET compaction at CS18.
         Q = grow_limbs(Q, F == LIMB, _limb_grow(t))          # limb buds emerge small, not big paddles
+        # THE DIGITAL RAYS + INTERZONES (cycle 82f): SOX9 condenses each paddle's distal cells into five
+        # rays across the fan from CS17, the phalangeal anlagen condense (GDF5 interzones between them)
+        # from CS18 -- the autopod completion ladder as a clock-gated head on the emitted embryo, with
+        # mesonephric_kidney and neurulate above; foot_completion.run_full applies the SAME transform to
+        # the full cloud (the movie path = the scored path). Each limb pair is patterned as one folded
+        # paddle (the frames are symmetrised).
+        from medic.digital_ray_head import apply_frame as _digital_rays_frame
+        _digital_rays_frame(Q, F, prc2, LIMB)
         Q = fetal_curl(Q, _curl_amt(t), F, sign=-1.0); Q = Q - Q.mean(0)   # curl into the fetal C.
         # SIGN RECALIBRATED 2026-09-02 (Miles: "is our model curled with the heart inward or the
         # spine inward?"): the side-view court (_curl_vs_canon_court.png) against the POST-ordinal,
